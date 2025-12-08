@@ -269,22 +269,34 @@ def _get_fallback_status(
     error_note: str | None = None,
 ) -> dict[str, Any]:
     """Return a fallback status when IODA data is unavailable."""
+    # Check if the code looks invalid (not a real ISO country code)
+    is_invalid_code = len(country_code) != 2 or country_code not in COUNTRY_MAPPING
+    
+    if is_invalid_code:
+        error_msg = (
+            f"IODA only supports country-level data (e.g., 'UA' for Ukraine). "
+            f"'{country_name}' appears to be a region/city, not a country. "
+            f"Try using the country code instead (e.g., country_code='UA' for Ukraine)."
+        )
+    else:
+        error_msg = error_note or f"IODA returned no data for {country_name} ({country_code}). The API may be temporarily unavailable."
+
     current_status = ConnectivityStatus(
         region=country_name,
         region_code=country_code,
-        status="unknown",
+        status="no_data",
         bgp_visibility=None,
         active_probes=None,
         last_updated=datetime.utcnow().isoformat(),
     )
 
     return IODAResponse(
-        status="success",
+        status="error" if is_invalid_code else "success",
         query_params=query_params,
         current_status=current_status,
         recent_outages=[],
-        error_message=error_note or "Limited data available for this region. Status is estimated.",
-        data_source="Fallback/Estimated",
+        error_message=error_msg,
+        data_source="IODA (no data available)",
     ).model_dump()
 
 

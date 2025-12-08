@@ -6,6 +6,7 @@ System (FIRMS) for thermal anomalies detection, which can indicate fires, explos
 or other heat-generating events.
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +14,13 @@ import httpx
 from pydantic import BaseModel, Field
 
 from src.shared.config import settings
+from src.shared.logger import get_logger
+
+logger = get_logger()
+
+# Retry configuration for NASA FIRMS API
+FIRMS_MAX_RETRIES = 3
+FIRMS_RETRY_DELAYS = [2, 5, 10]  # seconds between retries (exponential backoff)
 
 
 class ThermalAnomaly(BaseModel):
@@ -125,79 +133,119 @@ async def check_nasa_firms(
         "query_time": datetime.utcnow().isoformat(),
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
+    # Retry logic with exponential backoff for timeouts
+    last_error: str | None = None
+    
+    for attempt in range(FIRMS_MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:  # Increased timeout
+                response = await client.get(url)
+                response.raise_for_status()
 
-            # Parse CSV response
-            lines = response.text.strip().split("\n")
+                # Parse CSV response
+                lines = response.text.strip().split("\n")
 
-            if len(lines) <= 1:
+                if len(lines) <= 1:
+                    return FIRMSResponse(
+                        status="success",
+                        query_params=query_params,
+                        anomaly_count=0,
+                        anomalies=[],
+                    ).model_dump()
+
+                # Parse header and data
+                headers = lines[0].lower().split(",")
+                anomalies: list[ThermalAnomaly] = []
+
+                for line in lines[1:]:
+                    values = line.split(",")
+                    if len(values) < len(headers):
+                        continue
+
+                    row = dict(zip(headers, values))
+
+                    try:
+                        anomaly = ThermalAnomaly(
+                            latitude=float(row.get("latitude", 0)),
+                            longitude=float(row.get("longitude", 0)),
+                            brightness=float(row.get("bright_ti4", row.get("brightness", 0))),
+                            scan=float(row.get("scan", 0)),
+                            track=float(row.get("track", 0)),
+                            acq_date=row.get("acq_date", ""),
+                            acq_time=row.get("acq_time", ""),
+                            satellite=row.get("satellite", "VIIRS"),
+                            confidence=row.get("confidence", "nominal"),
+                            frp=float(row["frp"]) if row.get("frp") else None,
+                        )
+                        anomalies.append(anomaly)
+                    except (ValueError, KeyError):
+                        # Skip malformed rows
+                        continue
+
                 return FIRMSResponse(
                     status="success",
                     query_params=query_params,
-                    anomaly_count=0,
-                    anomalies=[],
+                    anomaly_count=len(anomalies),
+                    anomalies=anomalies,
                 ).model_dump()
 
-            # Parse header and data
-            headers = lines[0].lower().split(",")
-            anomalies: list[ThermalAnomaly] = []
-
-            for line in lines[1:]:
-                values = line.split(",")
-                if len(values) < len(headers):
-                    continue
-
-                row = dict(zip(headers, values))
-
-                try:
-                    anomaly = ThermalAnomaly(
-                        latitude=float(row.get("latitude", 0)),
-                        longitude=float(row.get("longitude", 0)),
-                        brightness=float(row.get("bright_ti4", row.get("brightness", 0))),
-                        scan=float(row.get("scan", 0)),
-                        track=float(row.get("track", 0)),
-                        acq_date=row.get("acq_date", ""),
-                        acq_time=row.get("acq_time", ""),
-                        satellite=row.get("satellite", "VIIRS"),
-                        confidence=row.get("confidence", "nominal"),
-                        frp=float(row["frp"]) if row.get("frp") else None,
-                    )
-                    anomalies.append(anomaly)
-                except (ValueError, KeyError):
-                    # Skip malformed rows
-                    continue
-
+        except httpx.TimeoutException:
+            last_error = "Request to NASA FIRMS timed out"
+            if attempt < FIRMS_MAX_RETRIES - 1:
+                delay = FIRMS_RETRY_DELAYS[attempt]
+                logger.warning(
+                    f"NASA FIRMS timeout (attempt {attempt + 1}/{FIRMS_MAX_RETRIES}), "
+                    f"retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+                continue
+            # Last attempt failed
             return FIRMSResponse(
-                status="success",
+                status="error",
                 query_params=query_params,
-                anomaly_count=len(anomalies),
-                anomalies=anomalies,
+                anomaly_count=0,
+                error_message=f"{last_error} after {FIRMS_MAX_RETRIES} attempts. The NASA FIRMS API may be experiencing high load.",
             ).model_dump()
 
-    except httpx.TimeoutException:
-        return FIRMSResponse(
-            status="error",
-            query_params=query_params,
-            anomaly_count=0,
-            error_message="Request to NASA FIRMS timed out. Try again later.",
-        ).model_dump()
+        except httpx.HTTPStatusError as e:
+            # Don't retry on HTTP errors (they're usually not transient)
+            return FIRMSResponse(
+                status="error",
+                query_params=query_params,
+                anomaly_count=0,
+                error_message=f"NASA FIRMS API returned HTTP {e.response.status_code}: {e.response.text[:200]}",
+            ).model_dump()
 
-    except httpx.HTTPStatusError as e:
-        return FIRMSResponse(
-            status="error",
-            query_params=query_params,
-            anomaly_count=0,
-            error_message=f"NASA FIRMS API returned HTTP {e.response.status_code}: {e.response.text[:200]}",
-        ).model_dump()
+        except httpx.ConnectError as e:
+            last_error = f"Failed to connect to NASA FIRMS: {str(e)}"
+            if attempt < FIRMS_MAX_RETRIES - 1:
+                delay = FIRMS_RETRY_DELAYS[attempt]
+                logger.warning(
+                    f"NASA FIRMS connection error (attempt {attempt + 1}/{FIRMS_MAX_RETRIES}), "
+                    f"retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+                continue
+            return FIRMSResponse(
+                status="error",
+                query_params=query_params,
+                anomaly_count=0,
+                error_message=f"{last_error} after {FIRMS_MAX_RETRIES} attempts.",
+            ).model_dump()
 
-    except Exception as e:
-        return FIRMSResponse(
-            status="error",
-            query_params=query_params,
-            anomaly_count=0,
-            error_message=f"Unexpected error querying NASA FIRMS: {str(e)}",
-        ).model_dump()
+        except Exception as e:
+            return FIRMSResponse(
+                status="error",
+                query_params=query_params,
+                anomaly_count=0,
+                error_message=f"Unexpected error querying NASA FIRMS: {str(e)}",
+            ).model_dump()
+    
+    # Fallback (shouldn't reach here normally)
+    return FIRMSResponse(
+        status="error",
+        query_params=query_params,
+        anomaly_count=0,
+        error_message=last_error or "Unknown error after retries",
+    ).model_dump()
 

@@ -64,6 +64,27 @@ Consider:
 - What time range is most relevant?
 - Which data sources are most likely to have relevant information?
 
+## CRITICAL: GDELT Query Syntax Rules
+
+When creating keywords for news searches (search_news tool), you MUST follow GDELT syntax:
+
+1. **OR operators MUST be inside parentheses**: 
+   - ✅ CORRECT: `(Odessa OR Odesa) AND missile`
+   - ❌ WRONG: `Odessa OR Odesa AND missile`
+
+2. **Group related terms together**:
+   - ✅ CORRECT: `(missile OR drone OR strike) AND (Kyiv OR Kiev)`
+   - ❌ WRONG: `missile OR drone OR strike AND Kyiv OR Kiev`
+
+3. **Simple queries work best**:
+   - ✅ CORRECT: `Ukraine military strike`
+   - ✅ CORRECT: `(Ukraine OR Ukrain) AND (attack OR strike)`
+
+4. **For source_country, use GDELT country names** (NOT ISO codes):
+   - ✅ CORRECT: `Ukraine`, `Russia`, `China`, `Iran`, `Israel`, `US`, `UK`
+   - ✅ Multi-word: `SouthKorea`, `NorthKorea`, `SaudiArabia`, `SouthAfrica`, `NewZealand`
+   - ❌ WRONG: `UA`, `RU`, `CN` (ISO codes will not work)
+
 Think step by step about how to approach this investigation systematically.
 """
 
@@ -202,6 +223,16 @@ Queries executed: {num_queries}
 
 Should we gather more data, or is it time to synthesize the final report?
 
+## IMPORTANT: Query Syntax Rules
+
+When specifying queries, follow these rules:
+
+### For search_news:
+- OR operators MUST be inside parentheses
+- ✅ CORRECT: `"keywords": "(term1 OR term2) AND term3"`
+- ❌ WRONG: `"keywords": "term1 OR term2 AND term3"`
+- For source_country use names like: Ukraine, Russia, China, Iran (NOT ISO codes like UA, RU)
+
 If more data needed, specify queries as:
 {{"queries": [{{"tool": "...", "args": {{...}}, "reason": "..."}}]}}
 
@@ -289,6 +320,22 @@ For each hypothesis:
 4. Assign an initial confidence (0.0 to 1.0)
 5. Suggest specific queries to test it
 
+## CRITICAL: Query Syntax Rules for test_queries
+
+When specifying `test_queries`, follow these rules:
+
+### For search_news tool:
+- **OR operators MUST be inside parentheses**
+- ✅ `"keywords": "(Odessa OR Odesa) AND (strike OR attack)"`
+- ✅ `"keywords": "Ukraine AND (missile OR drone)"`
+- ❌ `"keywords": "Odessa OR Odesa AND strike"` (WRONG - OR outside parens)
+- **For source_country use country NAMES not ISO codes**:
+  - ✅ `"source_country": "Ukraine"` or `"source_country": "Russia"`
+  - ❌ `"source_country": "UA"` or `"source_country": "RU"` (WRONG)
+
+### For detect_thermal_anomalies tool:
+- Just provide coordinates and radius, no keywords needed
+
 ## Guidelines
 
 - Hypotheses should be falsifiable
@@ -312,7 +359,7 @@ Respond ONLY with JSON:
             "refuting_evidence_criteria": ["What would refute this"],
             "initial_confidence": 0.6,
             "test_queries": [
-                {{"tool": "search_news", "args": {{}}, "reason": "..."}}
+                {{"tool": "search_news", "args": {{"keywords": "(term1 OR term2) AND (term3 OR term4)", "source_country": "Ukraine"}}, "reason": "..."}}
             ]
         }}
     ]
@@ -396,6 +443,12 @@ Critically examine the analysis so far and identify:
 5. Any inconsistencies between conclusions
 
 Be harsh but fair. The goal is to improve the analysis, not to criticize.
+
+## Query Syntax Rules for investigation_suggestions
+
+When suggesting follow-up queries:
+- **search_news**: OR operators MUST be in parentheses → `"(term1 OR term2) AND term3"`
+- **source_country**: Use country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
 
 Respond ONLY with JSON:
 {{
@@ -535,6 +588,12 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 3. How findings relate to hypotheses
 4. Confidence levels with justification
 5. What additional information would help
+
+## Query Syntax for Follow-up Queries
+
+If suggesting follow-up queries:
+- **search_news**: OR operators MUST be in parentheses → `"(term1 OR term2) AND term3"`
+- **source_country**: Use country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
 
 Be analytical and systematic. Note uncertainties explicitly.
 """

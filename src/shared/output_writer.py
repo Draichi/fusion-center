@@ -475,6 +475,104 @@ Response:
                 "",
             ])
         
+        # Sources Used section
+        executed_queries = state.get("executed_queries", [])
+        findings = state.get("findings", [])
+        
+        if executed_queries or findings:
+            report_lines.extend([
+                "---",
+                "",
+                "## Sources Used",
+                "",
+            ])
+            
+            # Group queries by tool/source
+            sources_summary = {}
+            for query in executed_queries:
+                tool = query.get("tool", "unknown")
+                status = query.get("status", "unknown")
+                
+                if tool not in sources_summary:
+                    sources_summary[tool] = {"success": 0, "failed": 0, "queries": []}
+                
+                if status == "success":
+                    sources_summary[tool]["success"] += 1
+                else:
+                    sources_summary[tool]["failed"] += 1
+                
+                sources_summary[tool]["queries"].append(query)
+            
+            # Map tool names to human-readable source names
+            tool_to_source = {
+                "search_news": "GDELT News Database",
+                "detect_thermal_anomalies": "NASA FIRMS Satellite Data",
+                "check_connectivity": "IODA Internet Monitoring",
+                "check_traffic_metrics": "Cloudflare Radar",
+                "search_sanctions": "OpenSanctions Database",
+                "screen_entity": "Sanctions Screening",
+            }
+            
+            for tool, info in sources_summary.items():
+                source_name = tool_to_source.get(tool, tool)
+                success_count = info["success"]
+                failed_count = info["failed"]
+                
+                status_icon = "✅" if failed_count == 0 else "⚠️" if success_count > 0 else "❌"
+                
+                report_lines.append(f"### {status_icon} {source_name}")
+                report_lines.append("")
+                report_lines.append(f"- **Queries:** {success_count + failed_count} total ({success_count} successful, {failed_count} failed)")
+                
+                # Show query details
+                for q in info["queries"][:5]:  # Limit to first 5
+                    args = q.get("args", {})
+                    status = "✓" if q.get("status") == "success" else "✗"
+                    
+                    # Format query args nicely
+                    if tool == "search_news":
+                        keywords = args.get("keywords", "N/A")
+                        country = args.get("source_country", "Global")
+                        report_lines.append(f"  - {status} Keywords: `{keywords[:50]}...` | Source: {country}")
+                    elif tool == "detect_thermal_anomalies":
+                        lat = args.get("latitude", "?")
+                        lon = args.get("longitude", "?")
+                        radius = args.get("radius_km", "?")
+                        report_lines.append(f"  - {status} Location: ({lat}, {lon}) | Radius: {radius}km")
+                    elif tool == "check_connectivity":
+                        region = args.get("region_name") or args.get("country_code", "N/A")
+                        report_lines.append(f"  - {status} Region: {region}")
+                    elif tool == "check_traffic_metrics":
+                        country = args.get("country_code", "N/A")
+                        metric = args.get("metric", "traffic")
+                        report_lines.append(f"  - {status} Country: {country} | Metric: {metric}")
+                    else:
+                        report_lines.append(f"  - {status} {args}")
+                
+                if len(info["queries"]) > 5:
+                    report_lines.append(f"  - ... and {len(info['queries']) - 5} more queries")
+                
+                report_lines.append("")
+            
+            # Add news article sources if available
+            news_sources = set()
+            for finding in findings:
+                if finding.get("source_type") == "news":
+                    domain = finding.get("source") or finding.get("content", {}).get("domain")
+                    if domain:
+                        news_sources.add(domain)
+            
+            if news_sources:
+                report_lines.extend([
+                    "### 📰 News Sources Cited",
+                    "",
+                ])
+                for source in sorted(news_sources)[:20]:  # Limit to 20 sources
+                    report_lines.append(f"- {source}")
+                if len(news_sources) > 20:
+                    report_lines.append(f"- ... and {len(news_sources) - 20} more sources")
+                report_lines.append("")
+        
         # Metadata footer
         report_lines.extend([
             "---",

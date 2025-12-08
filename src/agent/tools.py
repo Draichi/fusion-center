@@ -24,23 +24,20 @@ logger = get_logger()
 class SearchNewsInput(BaseModel):
     """Input for searching news articles."""
     
-    keywords: str = Field(description="Search keywords (e.g., 'military strike', 'protest')")
-    country_code: str | None = Field(
+    keywords: str = Field(
+        description="Search keywords with GDELT boolean syntax. "
+        "IMPORTANT: OR operators MUST be inside parentheses. "
+        "Examples: '(Odessa OR Odesa) AND missile', 'Ukraine AND (strike OR attack)'. "
+        "WRONG: 'Odessa OR Odesa AND missile' (OR outside parentheses will fail)"
+    )
+    source_country: str | None = Field(
         default=None,
-        description="ISO 2-letter country code (e.g., 'UA', 'RU', 'IR')"
+        description="Country name to filter by news source. Use GDELT format: "
+        "Ukraine, Russia, China, Iran, Israel, US, UK, Germany, France, etc. "
+        "Multi-word names without spaces: SouthKorea, NorthKorea, SaudiArabia, SouthAfrica."
     )
     max_records: int = Field(default=50, description="Maximum articles to return (1-250)")
     timespan: str = Field(default="7d", description="Time range: '7d', '24h', '30m'")
-
-
-class SearchNewsByLocationInput(BaseModel):
-    """Input for searching news by location."""
-    
-    keywords: str = Field(description="Search keywords")
-    latitude: float = Field(description="Latitude (-90 to 90)")
-    longitude: float = Field(description="Longitude (-180 to 180)")
-    radius_km: int = Field(default=100, description="Search radius in km (1-500)")
-    max_records: int = Field(default=50, description="Maximum articles (1-250)")
 
 
 class DetectThermalAnomaliesInput(BaseModel):
@@ -57,11 +54,14 @@ class CheckConnectivityInput(BaseModel):
     
     country_code: str | None = Field(
         default=None,
-        description="ISO 2-letter country code (e.g., 'UA', 'IR')"
+        description="ISO 2-letter COUNTRY code (e.g., 'UA', 'RU', 'IR'). "
+        "IMPORTANT: IODA only works at country level, NOT regions/cities. "
+        "Use 'UA' for all of Ukraine, not 'Odessa' for a specific region."
     )
     region_name: str | None = Field(
         default=None,
-        description="Region name (e.g., 'Ukraine')"
+        description="Full COUNTRY name (e.g., 'Ukraine', 'Russia'). "
+        "NOT for regions or cities - use the whole country name."
     )
     hours_back: int = Field(default=24, description="Hours to look back (1-168)")
 
@@ -96,7 +96,6 @@ class SearchSanctionsInput(BaseModel):
 # Valid tool names that exist in the MCP server
 VALID_TOOL_NAMES = {
     "search_news",
-    "search_news_by_location",
     "detect_thermal_anomalies",
     "check_connectivity",
     "check_traffic_metrics",
@@ -119,6 +118,8 @@ TOOL_NAME_ALIASES = {
     "OpenSanctions": "search_sanctions",
     "cloudflare": "check_traffic_metrics",
     "cloudflare_radar": "check_traffic_metrics",
+    # Redirect removed tool to search_news
+    "search_news_by_location": "search_news",
 }
 
 
@@ -198,33 +199,16 @@ class MCPToolExecutor:
     async def search_news(
         self,
         keywords: str,
-        country_code: str | None = None,
+        source_country: str | None = None,
         max_records: int = 50,
         timespan: str = "7d",
     ) -> dict[str, Any]:
         """Search GDELT for news articles."""
         return await self.execute("search_news", {
             "keywords": keywords,
-            "country_code": country_code,
+            "source_country": source_country,
             "max_records": max_records,
             "timespan": timespan,
-        })
-    
-    async def search_news_by_location(
-        self,
-        keywords: str,
-        latitude: float,
-        longitude: float,
-        radius_km: int = 100,
-        max_records: int = 50,
-    ) -> dict[str, Any]:
-        """Search news near a location."""
-        return await self.execute("search_news_by_location", {
-            "keywords": keywords,
-            "latitude": latitude,
-            "longitude": longitude,
-            "radius_km": radius_km,
-            "max_records": max_records,
         })
     
     async def detect_thermal_anomalies(
@@ -299,26 +283,33 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "name": "search_news",
             "description": """Search GDELT for news articles about geopolitical events.
             Use this to find breaking news about conflicts, protests, military activities,
-            political events, and humanitarian crises. Supports boolean operators (AND, OR, NOT).""",
+            political events, and humanitarian crises.
+            
+            SYNTAX RULES for keywords:
+            - OR operators MUST be inside parentheses
+            - CORRECT: "(Odessa OR Odesa) AND (strike OR attack)"
+            - CORRECT: "Ukraine AND (missile OR drone)"
+            - WRONG: "Odessa OR Odesa AND missile" (will fail)
+            
+            For source_country, use GDELT country names:
+            Ukraine, Russia, China, Iran, Israel, US, UK, Germany, France,
+            SouthKorea, NorthKorea, SaudiArabia, SouthAfrica, NewZealand, etc.""",
             "parameters": SearchNewsInput.model_json_schema(),
-        },
-        {
-            "name": "search_news_by_location",
-            "description": """Search for news articles near specific coordinates.
-            Useful for correlating satellite data with news reports.
-            Finds news about events happening in a geographic area.""",
-            "parameters": SearchNewsByLocationInput.model_json_schema(),
         },
         {
             "name": "detect_thermal_anomalies",
             "description": """Detect fires, explosions, and heat signatures using NASA FIRMS satellite data.
             Thermal anomalies can indicate: active fires, industrial explosions, military strikes,
-            or large-scale burning events. Requires NASA API key.""",
+            or large-scale burning events. Includes automatic retry on timeout.""",
             "parameters": DetectThermalAnomaliesInput.model_json_schema(),
         },
         {
             "name": "check_connectivity",
-            "description": """Check for internet outages and connectivity issues in a country/region.
+            "description": """Check for internet outages and connectivity issues at COUNTRY level.
+            IMPORTANT: IODA only works for whole countries, NOT cities or regions.
+            - Use country_code='UA' for Ukraine (not 'Odessa')
+            - Use country_code='RU' for Russia (not 'Moscow')
+            
             Detects: government-imposed shutdowns, infrastructure damage from conflicts,
             cyber attacks on networks, cable cuts, or routing anomalies.""",
             "parameters": CheckConnectivityInput.model_json_schema(),
@@ -337,4 +328,3 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "parameters": SearchSanctionsInput.model_json_schema(),
         },
     ]
-

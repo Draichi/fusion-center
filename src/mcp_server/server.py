@@ -24,7 +24,7 @@ from mcp.server.fastmcp import FastMCP
 # Import tools
 from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_outages
 from src.mcp_server.tools.geo import check_nasa_firms
-from src.mcp_server.tools.news import query_gdelt_events, query_gdelt_geo
+from src.mcp_server.tools.news import query_gdelt_events
 from src.mcp_server.tools.sanctions import check_entity_sanctions, get_sanctions_info
 
 # Import shared modules
@@ -55,7 +55,7 @@ mcp = FastMCP(name=settings.mcp_server_name)
 @mcp.tool()
 async def search_news(
     keywords: str,
-    country_code: str | None = None,
+    source_country: str | None = None,
     max_records: int = 50,
     timespan: str = "7d",
 ) -> dict[str, Any]:
@@ -70,9 +70,12 @@ async def search_news(
 
     Args:
         keywords: Search terms (e.g., "military strike", "protest", "sanctions").
-                  Supports boolean operators: AND, OR, NOT.
-        country_code: Optional ISO 2-letter country code to filter by source country
-                      (e.g., "UA" for Ukraine, "RU" for Russia, "CN" for China).
+                  Supports boolean operators: AND, OR (must be in parentheses), NOT.
+                  Examples: "(Odessa OR Odesa) AND missile", "Ukraine AND (strike OR attack)"
+        source_country: Optional country name to filter by news source origin.
+                        Use GDELT format: Ukraine, Russia, China, Iran, Israel, US, UK,
+                        Germany, France, etc. Multi-word names without spaces:
+                        SouthKorea, NorthKorea, SaudiArabia, SouthAfrica, NewZealand.
         max_records: Maximum articles to return (1-250). Default: 50.
         timespan: Time range to search. Format: number + unit.
                   Examples: "7d" (7 days), "24h" (24 hours). Default: "7d".
@@ -83,14 +86,14 @@ async def search_news(
     log_tool_call(
         "search_news",
         keywords=keywords,
-        country_code=country_code,
+        source_country=source_country,
         max_records=max_records,
         timespan=timespan,
     )
 
     result = await query_gdelt_events(
         keywords=keywords,
-        country_code=country_code,
+        source_country=source_country,
         max_records=max_records,
         timespan=timespan,
     )
@@ -100,56 +103,6 @@ async def search_news(
         status=result.get("status", "unknown"),
         count=result.get("article_count", 0),
         details={"keywords": keywords, "timespan": timespan},
-    )
-
-    return result
-
-
-@mcp.tool()
-async def search_news_by_location(
-    keywords: str,
-    latitude: float,
-    longitude: float,
-    radius_km: int = 100,
-    max_records: int = 50,
-) -> dict[str, Any]:
-    """
-    Search for news articles near a specific geographic location.
-
-    Use this to correlate news reports with satellite or other location-based data.
-    Helpful for verifying events detected via thermal anomalies or other sensors.
-
-    Args:
-        keywords: Search terms for the news content.
-        latitude: Latitude of the center point (-90 to 90).
-        longitude: Longitude of the center point (-180 to 180).
-        radius_km: Search radius in kilometers (1-500). Default: 100km.
-        max_records: Maximum articles to return (1-250). Default: 50.
-
-    Returns:
-        Dictionary with news articles from or about the specified location.
-    """
-    log_tool_call(
-        "search_news_by_location",
-        keywords=keywords,
-        latitude=latitude,
-        longitude=longitude,
-        radius_km=radius_km,
-    )
-
-    result = await query_gdelt_geo(
-        keywords=keywords,
-        latitude=latitude,
-        longitude=longitude,
-        radius_km=radius_km,
-        max_records=max_records,
-    )
-
-    logger.result_summary(
-        tool_name="search_news_by_location",
-        status=result.get("status", "unknown"),
-        count=result.get("article_count", 0),
-        details={"location": f"({latitude}, {longitude})", "radius": f"{radius_km}km"},
     )
 
     return result
@@ -231,7 +184,11 @@ async def check_connectivity(
     hours_back: int = 24,
 ) -> dict[str, Any]:
     """
-    Check for internet outages and connectivity issues in a region.
+    Check for internet outages and connectivity issues at COUNTRY level.
+
+    **IMPORTANT**: IODA only provides country-level data, NOT city/region data.
+    - Use country_code="UA" for Ukraine (not "Odessa" or "Kyiv")
+    - Use country_code="RU" for Russia (not "Moscow")
 
     Uses IODA (Internet Outage Detection and Analysis) data to detect:
     - Government-imposed internet shutdowns
@@ -240,9 +197,10 @@ async def check_connectivity(
     - Cable cuts or major routing anomalies
 
     Args:
-        country_code: ISO 2-letter country code (e.g., "UA", "RU", "IR", "SY").
-        region_name: Alternative to country_code - full region name (e.g., "Ukraine").
-                     One of country_code or region_name must be provided.
+        country_code: ISO 2-letter COUNTRY code (e.g., "UA", "RU", "IR", "SY").
+                      Use this for whole countries only.
+        region_name: Full COUNTRY name (e.g., "Ukraine", "Russia").
+                     NOT for cities or regions - use whole country name.
         hours_back: Hours to look back for outages (1-168). Default: 24 hours.
 
     Returns:
@@ -479,7 +437,6 @@ def main() -> None:
     # Show registered tools
     tools_info = [
         ("search_news", "📰 News", "Search GDELT for news articles"),
-        ("search_news_by_location", "📰 News", "Find news near coordinates"),
         ("detect_thermal_anomalies", "🛰️ Satellite", "NASA FIRMS fire detection"),
         ("check_connectivity", "🌐 Cyber", "IODA internet outages"),
         ("check_traffic_metrics", "🌐 Cyber", "Cloudflare Radar metrics"),
@@ -519,4 +476,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

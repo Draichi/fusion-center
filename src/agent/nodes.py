@@ -1066,7 +1066,7 @@ def _log_tool_result_summary(tool_name: str, result: dict[str, Any]) -> None:
     """Log a brief summary of tool results."""
     summary_lines = []
     
-    if tool_name in ["search_news", "search_news_by_location"]:
+    if tool_name == "search_news":
         articles = result.get("articles", [])
         if articles:
             summary_lines.append(f"[bold]Found {len(articles)} articles:[/bold]")
@@ -1133,22 +1133,6 @@ def _extract_findings(
                 "confidence": "medium",
             })
     
-    elif tool_name == "search_news_by_location":
-        articles = result.get("articles", [])
-        for article in articles[:10]:
-            findings.append({
-                "source": article.get("domain", "unknown"),
-                "source_type": IntelligenceType.NEWS.value,
-                "timestamp": timestamp,
-                "content": {
-                    "title": article.get("title"),
-                    "url": article.get("url"),
-                    "date": article.get("seendate"),
-                },
-                "location": {"lat": args.get("latitude"), "lon": args.get("longitude")},
-                "relevance_score": 0.9,
-                "confidence": "medium",
-            })
     
     elif tool_name == "detect_thermal_anomalies":
         anomalies = result.get("anomalies", [])
