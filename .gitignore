@@ -61,3 +61,6 @@ output/
 .DS_Store
 Thumbs.db
 
+
+# Telegram session (sensitive auth data)
+.telegram_session/

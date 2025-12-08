@@ -26,6 +26,11 @@ from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_ou
 from src.mcp_server.tools.geo import check_nasa_firms
 from src.mcp_server.tools.news import query_gdelt_events
 from src.mcp_server.tools.sanctions import check_entity_sanctions, get_sanctions_info
+from src.mcp_server.tools.telegram import (
+    search_telegram_channels,
+    get_telegram_channel_info,
+    list_curated_channels,
+)
 
 # Import shared modules
 from src.shared.config import settings
@@ -386,6 +391,139 @@ async def screen_entity(
 
 
 # =============================================================================
+# Telegram OSINT Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def search_telegram(
+    keywords: str | None = None,
+    channels: list[str] | None = None,
+    category: str | None = None,
+    hours_back: int = 24,
+    max_messages: int = 50,
+) -> dict[str, Any]:
+    """
+    Search public Telegram channels for OSINT intelligence.
+
+    Monitors public Telegram channels for real-time information from:
+    - Conflict zones (Ukraine/Russia, Middle East)
+    - Independent news sources
+    - Military and defense analysis channels
+    - Breaking news before mainstream media
+
+    **Note:** Requires TELEGRAM_API_ID and TELEGRAM_API_HASH in .env file.
+    Get credentials at: https://my.telegram.org
+
+    Args:
+        keywords: Search terms to filter messages (case-insensitive).
+                  Examples: "missile", "Kharkiv", "drone strike".
+                  Leave empty for all recent messages.
+        channels: Specific channel usernames (without @).
+                  Examples: ["ukrainenowenglish", "ryaborov"].
+                  If not provided, searches curated OSINT channels.
+        category: Category of curated channels:
+                  - "news": Independent news (Meduza, The Insider, Kyiv Independent)
+                  - "osint_general": OSINT aggregators (Rybar, Bellingcat)
+        hours_back: Hours to look back (1-168). Default: 24.
+        max_messages: Max messages per channel (1-100). Default: 50.
+
+    Returns:
+        Dictionary with messages containing text, timestamps, views, and links.
+    """
+    log_tool_call(
+        "search_telegram",
+        keywords=keywords,
+        channels=channels,
+        category=category,
+        hours_back=hours_back,
+        max_messages=max_messages,
+    )
+
+    result = await search_telegram_channels(
+        keywords=keywords,
+        channels=channels,
+        category=category,
+        hours_back=hours_back,
+        max_messages=max_messages,
+    )
+
+    logger.result_summary(
+        tool_name="search_telegram",
+        status=result.get("status", "unknown"),
+        count=result.get("message_count", 0),
+        details={
+            "keywords": keywords,
+            "category": category or "all",
+            "hours_back": hours_back,
+        },
+    )
+
+    return result
+
+
+@mcp.tool()
+async def get_channel_info(
+    channel_username: str,
+) -> dict[str, Any]:
+    """
+    Get information about a specific Telegram channel.
+
+    Retrieves metadata about a public Telegram channel including:
+    - Channel name and description
+    - Subscriber count
+    - Verification status
+
+    Args:
+        channel_username: The channel username (with or without @).
+                          Example: "ukrainenowenglish"
+
+    Returns:
+        Dictionary with channel metadata.
+    """
+    log_tool_call("get_channel_info", channel_username=channel_username)
+
+    result = await get_telegram_channel_info(channel_username=channel_username)
+
+    status = result.get("status", "unknown")
+    channel_info = result.get("channel_info", {})
+
+    logger.result_summary(
+        tool_name="get_channel_info",
+        status=status,
+        count=1 if status == "success" else 0,
+        details={"channel": channel_username, "title": channel_info.get("title")},
+    )
+
+    return result
+
+
+@mcp.tool()
+def list_osint_channels() -> dict[str, Any]:
+    """
+    List all curated OSINT Telegram channels.
+
+    Returns a categorized list of public Telegram channels monitored
+    for OSINT purposes, covering various perspectives on geopolitical events.
+
+    Returns:
+        Dictionary with channel categories and descriptions.
+    """
+    log_tool_call("list_osint_channels")
+
+    result = list_curated_channels()
+
+    logger.result_summary(
+        tool_name="list_osint_channels",
+        status="success",
+        count=result.get("total_channels", 0),
+        details={"categories": len(result.get("categories", {}))},
+    )
+
+    return result
+
+
+# =============================================================================
 # Server Entry Point
 # =============================================================================
 
@@ -440,6 +578,9 @@ def main() -> None:
         ("detect_thermal_anomalies", "🛰️ Satellite", "NASA FIRMS fire detection"),
         ("check_connectivity", "🌐 Cyber", "IODA internet outages"),
         ("check_traffic_metrics", "🌐 Cyber", "Cloudflare Radar metrics"),
+        ("search_telegram", "📱 Telegram", "Search OSINT Telegram channels"),
+        ("get_channel_info", "📱 Telegram", "Get Telegram channel info"),
+        ("list_osint_channels", "📱 Telegram", "List curated OSINT channels"),
         ("search_sanctions", "🚫 Sanctions", "Search sanctions lists (stub)"),
         ("screen_entity", "🚫 Sanctions", "Entity screening (stub)"),
     ]
@@ -450,6 +591,10 @@ def main() -> None:
         "NASA_FIRMS_API_KEY": (
             settings.has_nasa_key,
             "Required for thermal anomaly detection",
+        ),
+        "TELEGRAM_API_ID/HASH": (
+            settings.has_telegram_credentials,
+            "Required for Telegram monitoring",
         ),
         "LOG_LEVEL": (
             True,

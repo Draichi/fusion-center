@@ -34,10 +34,12 @@ Project Overwatch is an autonomous intelligence system that combines a Model Con
 | Category | Tool | Description |
 |----------|------|-------------|
 | 📰 **News** | `search_news` | Search GDELT for global news |
-| 📰 **News** | `search_news_by_location` | Find news near coordinates |
 | 🛰️ **Satellite** | `detect_thermal_anomalies` | NASA FIRMS fire/explosion detection |
 | 🌐 **Cyber** | `check_connectivity` | IODA internet outage detection |
 | 🌐 **Cyber** | `check_traffic_metrics` | Cloudflare Radar analysis |
+| 📱 **Telegram** | `search_telegram` | Search OSINT Telegram channels |
+| 📱 **Telegram** | `get_channel_info` | Get Telegram channel metadata |
+| 📱 **Telegram** | `list_osint_channels` | List curated OSINT channels |
 | 🚫 **Sanctions** | `search_sanctions` | Search sanctions lists (stub) |
 | 🚫 **Sanctions** | `screen_entity` | Entity compliance screening (stub) |
 
@@ -77,6 +79,11 @@ Edit `.env`:
 ```bash
 # Required for satellite data
 NASA_FIRMS_API_KEY=your_key_here
+
+# Required for Telegram monitoring (get from https://my.telegram.org)
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+# After setting these, run: python scripts/telegram_auth.py
 
 # For agent (choose based on provider)
 GOOGLE_API_KEY=your_google_key      # for gemini provider
@@ -131,6 +138,9 @@ fusion-center/
 ├── .env.example                # Environment template
 ├── README.md
 │
+├── scripts/
+│   └── telegram_auth.py        # One-time Telegram authentication
+│
 ├── output/                     # Research outputs
 │   └── {session_id}/
 │       ├── report.md           # Final intelligence report
@@ -147,6 +157,7 @@ fusion-center/
     │       ├── geo.py          # NASA FIRMS
     │       ├── news.py         # GDELT
     │       ├── cyber.py        # IODA/Cloudflare
+    │       ├── telegram.py     # Telegram OSINT channels
     │       └── sanctions.py    # OpenSanctions (stub)
     │
     ├── agent/                  # 🤖 AI Agent
@@ -213,6 +224,7 @@ async def run_analysis():
 | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Satellite fire detection | Free API key |
 | [IODA](https://ioda.inetintel.cc.gatech.edu/) | Internet outages | Free |
 | [Cloudflare Radar](https://radar.cloudflare.com/) | Traffic analytics | Free (limited) |
+| [Telegram](https://my.telegram.org/) | OSINT channel monitoring | Free API credentials |
 | [OpenSanctions](https://www.opensanctions.org/) | Sanctions database | Planned |
 
 ## 🧪 Development
@@ -330,14 +342,23 @@ All reasoning steps are logged to `reasoning.log` including:
 
 ## 🗺️ Roadmap
 
+### ✅ Completed
 - [x] MCP Server with OSINT tools
 - [x] Rich logging system
 - [x] Project restructuring (monorepo)
 - [x] Agent skeleton
 - [x] LLM integration (Gemini/Grok/Ollama/Docker)
 - [x] Multi-step reasoning
+
+### 🔴 Priority: New Data Sources
+- [x] **Telegram Channels** - Real-time OSINT from conflict zones (Telethon API)
+- [ ] **ACLED** - Armed Conflict Location & Event Data for structured conflict data
+- [ ] **AlienVault OTX** - Open Threat Exchange for cyber threat intelligence
+- [ ] **OpenSanctions** - Complete implementation (replace current stub)
+- [ ] **Meduza/The Insider RSS** - Independent Russian news sources
+
+### 🟡 Future
 - [ ] Event correlation engine
-- [ ] OpenSanctions integration
 - [ ] Real-time alerting
 - [ ] Web dashboard
 

@@ -88,6 +88,27 @@ class SearchSanctionsInput(BaseModel):
     limit: int = Field(default=20, description="Maximum results (1-100)")
 
 
+class SearchTelegramInput(BaseModel):
+    """Input for searching Telegram channels."""
+    
+    keywords: str | None = Field(
+        default=None,
+        description="Search terms to filter messages (case-insensitive). "
+        "Examples: 'missile', 'Kharkiv', 'drone strike'. Leave empty for all recent messages."
+    )
+    channels: list[str] | None = Field(
+        default=None,
+        description="Specific channel usernames (without @). "
+        "Examples: ['meduzalive', 'rybar']. If not provided, searches curated channels."
+    )
+    category: str | None = Field(
+        default=None,
+        description="Category of curated channels: 'news' or 'osint_general'"
+    )
+    hours_back: int = Field(default=24, description="Hours to look back (1-168)")
+    max_messages: int = Field(default=50, description="Max messages per channel (1-100)")
+
+
 # =============================================================================
 # MCP Tool Executor
 # =============================================================================
@@ -101,6 +122,9 @@ VALID_TOOL_NAMES = {
     "check_traffic_metrics",
     "search_sanctions",
     "screen_entity",
+    "search_telegram",
+    "get_channel_info",
+    "list_osint_channels",
 }
 
 # Mapping from common LLM mistakes to actual tool names
@@ -120,6 +144,9 @@ TOOL_NAME_ALIASES = {
     "cloudflare_radar": "check_traffic_metrics",
     # Redirect removed tool to search_news
     "search_news_by_location": "search_news",
+    # Telegram aliases
+    "telegram": "search_telegram",
+    "Telegram": "search_telegram",
 }
 
 
@@ -264,6 +291,23 @@ class MCPToolExecutor:
             "countries": countries,
             "limit": limit,
         })
+    
+    async def search_telegram(
+        self,
+        keywords: str | None = None,
+        channels: list[str] | None = None,
+        category: str | None = None,
+        hours_back: int = 24,
+        max_messages: int = 50,
+    ) -> dict[str, Any]:
+        """Search Telegram OSINT channels."""
+        return await self.execute("search_telegram", {
+            "keywords": keywords,
+            "channels": channels,
+            "category": category,
+            "hours_back": hours_back,
+            "max_messages": max_messages,
+        })
 
 
 # =============================================================================
@@ -326,5 +370,16 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             NOTE: Currently returns mock data - real OpenSanctions integration pending.
             Searches OFAC SDN, EU, UK, and UN sanctions lists.""",
             "parameters": SearchSanctionsInput.model_json_schema(),
+        },
+        {
+            "name": "search_telegram",
+            "description": """Search public Telegram channels for OSINT intelligence in real-time.
+            Monitors curated channels for breaking news, conflict updates, and analysis from:
+            - Independent news: Meduza, The Insider, Kyiv Independent
+            - OSINT analysis: Rybar, Bellingcat
+            
+            Use this for real-time information from conflict zones that may not yet be in mainstream media.
+            Messages include text, timestamps, view counts, and direct links.""",
+            "parameters": SearchTelegramInput.model_json_schema(),
         },
     ]

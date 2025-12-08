@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from src.agent.state import AgentState, IntelligenceType, ResearchPhase, HypothesisStatus
-from src.agent.tools import MCPToolExecutor, get_tool_definitions
+from src.agent.tools import MCPToolExecutor, get_tool_definitions, TOOL_NAME_ALIASES, VALID_TOOL_NAMES
 from src.agent.prompts import (
     SYSTEM_PROMPT,
     PLANNER_PROMPT,
@@ -33,6 +33,27 @@ from src.shared.logger import get_logger, log_agent_step
 from src.shared.output_writer import get_output_writer
 
 logger = get_logger()
+
+
+def _resolve_tool_name(tool_name: str) -> str:
+    """
+    Resolve a tool name to its canonical form, handling aliases.
+    
+    This ensures that aliased tool names (like 'search_news_by_location')
+    are resolved to their actual names (like 'search_news') before
+    processing results.
+    
+    Args:
+        tool_name: The tool name, possibly an alias
+        
+    Returns:
+        The resolved canonical tool name
+    """
+    if tool_name in VALID_TOOL_NAMES:
+        return tool_name
+    if tool_name in TOOL_NAME_ALIASES:
+        return TOOL_NAME_ALIASES[tool_name]
+    return tool_name
 
 
 # =============================================================================
@@ -1008,6 +1029,9 @@ async def gather_intelligence(
         tool_name = query.get("tool")
         args = query.get("args", {})
         
+        # Resolve tool name to handle aliases (e.g., search_news_by_location -> search_news)
+        resolved_tool_name = _resolve_tool_name(tool_name)
+        
         logger.info(f"Executing query: [bold]{tool_name}[/bold]")
         
         result = await tool_executor.execute(tool_name, args)
@@ -1018,9 +1042,9 @@ async def gather_intelligence(
             "timestamp": datetime.utcnow().isoformat(),
         })
         
-        # Process results into findings
+        # Process results into findings using resolved name for proper extraction
         if result.get("status") == "success" or result.get("status") == "stub":
-            findings = _extract_findings(tool_name, args, result)
+            findings = _extract_findings(resolved_tool_name, args, result)
             new_findings.extend(findings)
             logger.success(f"Extracted {len(findings)} findings from {tool_name}")
             
@@ -1032,8 +1056,8 @@ async def gather_intelligence(
                 success=True,
             )
             
-            # Log brief result summary
-            _log_tool_result_summary(tool_name, result)
+            # Log brief result summary using resolved name
+            _log_tool_result_summary(resolved_tool_name, result)
         else:
             error_msg = result.get("error_message") or result.get("error", "Unknown error")
             logger.warning(f"Query returned error: {error_msg}")
@@ -1765,4 +1789,3 @@ def route_next_step(state: AgentState) -> Literal[
         return "end"
     else:
         return "end"
-

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     nasa_firms_api_key: str | None = None
     cloudflare_api_token: str | None = None
+    
+    # Telegram API credentials (obtain from https://my.telegram.org)
+    telegram_api_id: int | None = None
+    telegram_api_hash: str | None = None
 
     # External API URLs
     gdelt_api_base_url: str = "https://api.gdeltproject.org/api/v2"
@@ -81,6 +85,11 @@ class Settings(BaseSettings):
     def has_nasa_key(self) -> bool:
         """Check if NASA FIRMS API key is configured."""
         return bool(self.nasa_firms_api_key)
+
+    @property
+    def has_telegram_credentials(self) -> bool:
+        """Check if Telegram API credentials are configured."""
+        return bool(self.telegram_api_id and self.telegram_api_hash)
 
     @property
     def has_google_key(self) -> bool:
