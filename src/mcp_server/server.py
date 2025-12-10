@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 # Import tools
-from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_outages
+from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_outages, get_ioda_outages
 from src.mcp_server.tools.geo import check_nasa_firms
 from src.mcp_server.tools.news import query_gdelt_events
 from src.mcp_server.tools.sanctions import check_entity_sanctions, get_sanctions_info
@@ -278,6 +278,68 @@ async def check_traffic_metrics(
         status=result.get("status", "unknown"),
         count=len(result.get("metrics", {})),
         details={"country": country_code, "metric": metric},
+    )
+
+    return result
+
+
+@mcp.tool()
+async def get_outages(
+    entity_type: str = "country",
+    entity_code: str | None = None,
+    days_back: int = 7,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Get detected internet outage events from IODA.
+
+    Queries IODA's outage detection system for actual outage events.
+    Unlike check_connectivity which shows current status, this returns
+    a list of detected outage events with severity scores.
+
+    IODA uses multiple detection methods:
+    - BGP route visibility analysis
+    - Active probing (ping measurements)
+    - Network telescope (darknet traffic)
+    - Google Transparency Report data
+
+    Args:
+        entity_type: Type of entity to query:
+                     - 'country': Country-level (use ISO 2-letter code)
+                     - 'region': Sub-country regions
+                     - 'asn': Autonomous System outages
+                     Leave empty for global outages.
+        entity_code: Code for the entity (e.g., 'UA' for Ukraine).
+                     Leave empty for all entities of that type.
+        days_back: Days to look back (1-90). Default: 7.
+        limit: Maximum events to return (1-100). Default: 50.
+
+    Returns:
+        Dictionary with detected outage events, scores, and durations.
+    """
+    log_tool_call(
+        "get_outages",
+        entity_type=entity_type,
+        entity_code=entity_code,
+        days_back=days_back,
+        limit=limit,
+    )
+
+    result = await get_ioda_outages(
+        entity_type=entity_type,
+        entity_code=entity_code,
+        days_back=days_back,
+        limit=limit,
+    )
+
+    logger.result_summary(
+        tool_name="get_outages",
+        status=result.get("status", "unknown"),
+        count=result.get("outage_count", 0),
+        details={
+            "entity": f"{entity_type}/{entity_code}" if entity_code else entity_type,
+            "days_back": days_back,
+        },
     )
 
     return result
@@ -576,7 +638,8 @@ def main() -> None:
     tools_info = [
         ("search_news", "📰 News", "Search GDELT for news articles"),
         ("detect_thermal_anomalies", "🛰️ Satellite", "NASA FIRMS fire detection"),
-        ("check_connectivity", "🌐 Cyber", "IODA internet outages"),
+        ("check_connectivity", "🌐 Cyber", "IODA connectivity status"),
+        ("get_outages", "🌐 Cyber", "IODA detected outage events"),
         ("check_traffic_metrics", "🌐 Cyber", "Cloudflare Radar metrics"),
         ("search_telegram", "📱 Telegram", "Search OSINT Telegram channels"),
         ("get_channel_info", "📱 Telegram", "Get Telegram channel info"),
@@ -607,17 +670,23 @@ def main() -> None:
     logger.info(f"Server name: [bold]{mcp.name}[/bold]")
     logger.info(f"Transport: [bold]{args.transport.upper()}[/bold]")
 
-    if args.transport == "sse":
-        # Configure host and port in mcp settings (FastMCP uses settings, not run() args)
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-        logger.info(f"Endpoint: [bold]http://{args.host}:{args.port}/sse[/bold]")
-        logger.success("MCP Server starting in HTTP/SSE mode...")
-        mcp.run(transport="sse")
-    else:
-        logger.success("MCP Server starting in stdio mode...")
-        mcp.run(transport="stdio")
+    try:
+        if args.transport == "sse":
+            # Configure host and port in mcp settings (FastMCP uses settings, not run() args)
+            mcp.settings.host = args.host
+            mcp.settings.port = args.port
+            logger.info(f"Endpoint: [bold]http://{args.host}:{args.port}/sse[/bold]")
+            logger.success("MCP Server starting in HTTP/SSE mode...")
+            mcp.run(transport="sse")
+        else:
+            logger.success("MCP Server starting in stdio mode...")
+            mcp.run(transport="stdio")
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass  # Silent exit on Ctrl+C

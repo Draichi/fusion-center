@@ -482,26 +482,21 @@ def list_curated_channels() -> dict[str, Any]:
     Returns:
         Dictionary with channel categories and their descriptions.
     """
+    category_descriptions = {
+        "news": "Independent news outlets with Telegram presence",
+        "osint_general": "General OSINT aggregators and analysis",
+    }
+    
+    categories = {}
+    for cat_name, channels in OSINT_CHANNELS.items():
+        categories[cat_name] = {
+            "description": category_descriptions.get(cat_name, f"{cat_name} channels"),
+            "channels": channels,
+        }
+    
     return {
         "status": "success",
-        "categories": {
-            "ukraine_conflict": {
-                "description": "Pro-Ukraine channels covering the conflict",
-                "channels": OSINT_CHANNELS["ukraine_conflict"],
-            },
-            "russia_perspective": {
-                "description": "Russian perspective and military analysis",
-                "channels": OSINT_CHANNELS["russia_perspective"],
-            },
-            "osint_general": {
-                "description": "General OSINT aggregators and analysis",
-                "channels": OSINT_CHANNELS["osint_general"],
-            },
-            "news": {
-                "description": "News outlets with Telegram presence",
-                "channels": OSINT_CHANNELS["news"],
-            },
-        },
+        "categories": categories,
         "total_channels": len(ALL_OSINT_CHANNELS),
         "note": "All channels are public and can be accessed without special permissions.",
     }

@@ -152,15 +152,18 @@ async def check_internet_outages(
     start_time = end_time - timedelta(hours=hours_back)
 
     # IODA API endpoints
-    # Using the public IODA API from CAIDA
+    # Using the public IODA API from Georgia Tech (formerly CAIDA)
+    # Docs: https://api.ioda.inetintel.cc.gatech.edu/v2/
     ioda_base_url = "https://api.ioda.inetintel.cc.gatech.edu/v2"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Query IODA for country-level signals
-            # Entity type: country, Entity code: ISO country code
+            # Endpoint: /signals/raw/{entityType}/{entityCode}
+            # Entity type: country, region, asn
+            # Entity code: ISO 2-letter country code (e.g., UA, US, RU)
             signals_url = (
-                f"{ioda_base_url}/signals/country/{resolved_code}"
+                f"{ioda_base_url}/signals/raw/country/{resolved_code}"
                 f"?from={int(start_time.timestamp())}"
                 f"&until={int(end_time.timestamp())}"
             )
@@ -206,21 +209,75 @@ def _parse_ioda_response(
     country_code: str,
     country_name: str,
 ) -> dict[str, Any]:
-    """Parse IODA API response into our standard format."""
+    """Parse IODA API response into our standard format.
+    
+    IODA API v2 response structure:
+    - data: list containing one item (the country data)
+    - data[0]: list of datasources (bgp, gtr, ping-slash24, etc.)
+    - Each datasource has: entityType, entityCode, datasource, values[], step, etc.
+    
+    Note: Some datasources (gtr-sarima, ping-slash24-loss, ping-slash24-latency)
+    have list values instead of scalar values - we skip these for analysis.
+    """
     outages: list[OutageEvent] = []
-
-    # Extract signals data
-    signals = data.get("data", {}).get("signals", [])
-
-    # Determine overall status from recent signals
+    
+    # Datasources with scalar values (usable for connectivity analysis)
+    SCALAR_DATASOURCES = {"bgp", "gtr", "gtr-norm", "merit-nt", "ping-slash24"}
+    
+    # Extract datasources from the nested structure
+    # data is a list, data[0] is a list of datasource objects
+    raw_data = data.get("data", [])
+    datasources = raw_data[0] if raw_data and isinstance(raw_data[0], list) else []
+    
+    # Find BGP datasource for visibility metrics (most reliable for connectivity)
+    bgp_data = None
+    ping_data = None
+    datasource_info = {}
+    
+    for ds in datasources:
+        ds_name = ds.get("datasource", "")
+        datasource_info[ds_name] = {
+            "values_count": len(ds.get("values", [])),
+            "step": ds.get("step"),
+            "from": ds.get("from"),
+            "until": ds.get("until"),
+        }
+        # Only use datasources with scalar values
+        if ds_name not in SCALAR_DATASOURCES:
+            continue
+        if ds_name == "bgp":
+            bgp_data = ds
+        elif ds_name == "ping-slash24":
+            ping_data = ds
+    
+    # Calculate connectivity score from BGP or ping data
     recent_score = 1.0  # Default to normal
-    if signals:
-        # Get the most recent signal values
-        latest_signals = signals[-10:] if len(signals) > 10 else signals
-        avg_score = sum(s.get("score", 1.0) for s in latest_signals) / len(latest_signals)
-        recent_score = avg_score
+    active_probes = None
+    
+    # Prefer BGP data for visibility score
+    primary_data = bgp_data or ping_data
+    if primary_data:
+        values = primary_data.get("values", [])
+        if values:
+            # Get recent values (last 10 data points), filter out non-numeric values
+            recent_values = [
+                v for v in values[-10:] 
+                if v is not None and isinstance(v, (int, float))
+            ]
+            if recent_values:
+                # Normalize: compare to max value to get a ratio
+                max_val = max(recent_values) if recent_values else 1
+                avg_val = sum(recent_values) / len(recent_values)
+                
+                # If there's significant variation, there might be issues
+                if max_val > 0:
+                    recent_score = avg_val / max_val
+                
+                # Store active probes count if using ping data
+                if primary_data == ping_data:
+                    active_probes = int(avg_val) if avg_val else None
 
-    # Determine status level
+    # Determine status level based on score
     if recent_score >= 0.8:
         status_level = "normal"
     elif recent_score >= 0.5:
@@ -233,32 +290,64 @@ def _parse_ioda_response(
         region_code=country_code,
         status=status_level,
         bgp_visibility=recent_score * 100,
-        active_probes=None,
+        active_probes=active_probes,
         last_updated=datetime.utcnow().isoformat(),
     )
 
-    # Identify outage events from signal drops
-    for signal in signals:
-        score = signal.get("score", 1.0)
-        if score < 0.7:  # Significant drop
-            severity = "critical" if score < 0.3 else "high" if score < 0.5 else "medium"
-            outages.append(
-                OutageEvent(
-                    region=country_name,
-                    region_code=country_code,
-                    start_time=signal.get("time", ""),
-                    end_time=None,
-                    severity=severity,
-                    data_source="IODA BGP/Active Probing",
-                    metrics={"visibility_score": score},
+    # Check for significant drops in scalar datasources to identify outages
+    for ds in datasources:
+        ds_name = ds.get("datasource", "unknown")
+        
+        # Skip datasources with non-scalar values
+        if ds_name not in SCALAR_DATASOURCES:
+            continue
+            
+        values = ds.get("values", [])
+        step = ds.get("step", 300)  # Default 5 min intervals
+        start_time_unix = ds.get("from", 0)
+        
+        if not values or len(values) < 2:
+            continue
+        
+        # Filter to only numeric values
+        numeric_values = [(i, v) for i, v in enumerate(values) if isinstance(v, (int, float)) and v is not None]
+        if len(numeric_values) < 2:
+            continue
+            
+        # Calculate baseline (average of first half)
+        half_idx = len(numeric_values) // 2
+        baseline_values = [v for _, v in numeric_values[:half_idx]]
+        if not baseline_values:
+            continue
+        baseline = sum(baseline_values) / len(baseline_values)
+        
+        if baseline == 0:
+            continue
+            
+        # Look for significant drops (< 70% of baseline)
+        for i, val in numeric_values:
+            ratio = val / baseline
+            if ratio < 0.7:  # Significant drop
+                severity = "critical" if ratio < 0.3 else "high" if ratio < 0.5 else "medium"
+                event_time = datetime.utcfromtimestamp(start_time_unix + i * step)
+                outages.append(
+                    OutageEvent(
+                        region=country_name,
+                        region_code=country_code,
+                        start_time=event_time.isoformat(),
+                        end_time=None,
+                        severity=severity,
+                        data_source=f"IODA {ds_name}",
+                        metrics={"value": val, "baseline": baseline, "ratio": round(ratio, 3)},
+                    )
                 )
-            )
 
     return IODAResponse(
         status="success",
         query_params=query_params,
         current_status=current_status,
         recent_outages=outages,
+        data_source=f"IODA (datasources: {', '.join(datasource_info.keys())})",
     ).model_dump()
 
 
@@ -307,8 +396,8 @@ async def check_cloudflare_radar(
     """
     Query Cloudflare Radar for traffic and attack data.
 
-    Note: This endpoint uses public Cloudflare Radar data. For detailed metrics,
-    a Cloudflare API token is required.
+    Requires CLOUDFLARE_API_TOKEN with Account > Radar > Read permissions.
+    Get your token at: https://dash.cloudflare.com/profile/api-tokens
 
     Args:
         country_code: ISO 2-letter country code.
@@ -317,6 +406,8 @@ async def check_cloudflare_radar(
     Returns:
         Traffic and security metrics for the specified country.
     """
+    from src.shared.config import settings
+    
     country_code = country_code.upper()
     country_name = COUNTRY_MAPPING.get(country_code, country_code)
 
@@ -326,37 +417,314 @@ async def check_cloudflare_radar(
         "query_time": datetime.utcnow().isoformat(),
     }
 
-    # Cloudflare Radar public summary page
-    # Note: Full API access requires authentication
-    radar_url = f"https://radar.cloudflare.com/api/v1/traffic/summary?location={country_code}"
+    # Check if API token is configured
+    api_token = settings.cloudflare_api_token
+    if not api_token:
+        return {
+            "status": "error",
+            "query_params": query_params,
+            "error_message": "TOOL DISABLED: CLOUDFLARE_API_TOKEN not configured. "
+            "Create a Custom Token with Account > Radar > Read permissions at: "
+            "https://dash.cloudflare.com/profile/api-tokens",
+        }
+
+    # Cloudflare Radar API v4 - correct endpoint
+    # Docs: https://developers.cloudflare.com/radar/get-started/first-request/
+    base_url = "https://api.cloudflare.com/client/v4/radar"
+    
+    # Select endpoint based on metric type
+    if metric == "traffic":
+        # HTTP traffic summary by device type for a specific location
+        endpoint = f"{base_url}/http/summary/device_type"
+        params = {"location": country_code, "dateRange": "7d", "format": "json"}
+    elif metric == "attacks":
+        # Layer 3/4 attack summary
+        endpoint = f"{base_url}/attacks/layer3/summary"
+        params = {"location": country_code, "dateRange": "7d", "format": "json"}
+    elif metric == "routing":
+        # BGP routing stats
+        endpoint = f"{base_url}/bgp/routes/stats"
+        params = {"location": country_code, "format": "json"}
+    else:
+        return {
+            "status": "error",
+            "query_params": query_params,
+            "error_message": f"Unknown metric type: '{metric}'. Use 'traffic', 'attacks', or 'routing'.",
+        }
+
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(radar_url)
+            response = await client.get(endpoint, params=params, headers=headers)
 
             if response.status_code == 200:
                 data = response.json()
+                
+                if not data.get("success", False):
+                    errors = data.get("errors", [])
+                    error_msg = errors[0].get("message", "Unknown error") if errors else "API returned success=false"
+                    return {
+                        "status": "error",
+                        "query_params": query_params,
+                        "error_message": f"Cloudflare API error: {error_msg}",
+                        "raw_response": data,
+                    }
+                
+                result = data.get("result", {})
+                meta = result.get("meta", {})
+                
                 return {
                     "status": "success",
                     "query_params": query_params,
-                    "data_source": "Cloudflare Radar",
+                    "data_source": "Cloudflare Radar API v4",
                     "country": country_name,
-                    "metrics": data.get("result", {}),
+                    "metric_type": metric,
+                    "metrics": result,
+                    "date_range": meta.get("dateRange", {}),
+                    "confidence": meta.get("confidenceInfo", {}).get("level", "unknown"),
+                }
+            elif response.status_code == 401:
+                return {
+                    "status": "error",
+                    "query_params": query_params,
+                    "error_message": "Authentication failed. Check your CLOUDFLARE_API_TOKEN. "
+                    "Ensure the token has Account > Radar > Read permissions.",
+                }
+            elif response.status_code == 403:
+                return {
+                    "status": "error",
+                    "query_params": query_params,
+                    "error_message": "Access forbidden. Your API token may not have Radar permissions. "
+                    "Create a new token with Account > Radar > Read at: "
+                    "https://dash.cloudflare.com/profile/api-tokens",
                 }
             else:
                 return {
                     "status": "error",
                     "query_params": query_params,
-                    "error_message": f"TOOL ERROR: Cloudflare Radar returned HTTP {response.status_code}. "
-                    "No traffic data available from this request.",
-                    "note": "Public Cloudflare Radar API may require authentication for detailed data. "
-                    "Set CLOUDFLARE_API_TOKEN in .env for full access.",
+                    "error_message": f"Cloudflare Radar returned HTTP {response.status_code}: {response.text[:200]}",
                 }
+
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "query_params": query_params,
+            "error_message": "Request to Cloudflare Radar timed out.",
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "query_params": query_params,
+            "error_message": f"Error querying Cloudflare Radar: {type(e).__name__}: {str(e)}",
+        }
+
+
+async def get_ioda_outages(
+    entity_type: str = "country",
+    entity_code: str | None = None,
+    days_back: int = 7,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Query IODA for detected internet outage events.
+
+    This tool queries the IODA (Internet Outage Detection and Analysis) API
+    for detected outage events. Unlike check_internet_outages which shows
+    current connectivity status, this returns a list of actual outage events
+    detected by IODA's monitoring systems.
+
+    IODA detects outages using multiple data sources:
+    - BGP: Border Gateway Protocol route visibility
+    - Active Probing (ping-slash24): Active measurement probes
+    - Network Telescope (merit-nt): Darknet traffic analysis
+    - Google Transparency Report (gtr): Google product accessibility
+
+    Args:
+        entity_type: Type of entity to query. Options:
+                     - 'country': Country-level outages (use ISO 2-letter code)
+                     - 'region': Sub-country region outages
+                     - 'asn': Autonomous System Number outages
+                     Leave empty for global outages.
+        entity_code: Code for the entity (e.g., 'UA' for Ukraine, 'AS12345' for ASN).
+                     Leave empty for all entities of the specified type.
+        days_back: Number of days to look back (1-90). Default: 7 days.
+        limit: Maximum number of outage events to return (1-100). Default: 50.
+
+    Returns:
+        Dictionary containing:
+        - status: 'success' or 'error'
+        - query_params: Parameters used for the query
+        - outage_count: Number of outage events found
+        - outages: List of detected outage events with details
+        - error_message: Error details if the query failed
+
+    Example:
+        >>> result = await get_ioda_outages(entity_type="country", entity_code="UA", days_back=7)
+        >>> for outage in result['outages']:
+        ...     print(f"{outage['location_name']}: score={outage['score']}")
+    """
+    # Validate parameters
+    days_back = max(1, min(90, days_back))
+    limit = max(1, min(100, limit))
+
+    # Calculate time range
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=days_back)
+
+    query_params = {
+        "entity_type": entity_type,
+        "entity_code": entity_code,
+        "days_back": days_back,
+        "limit": limit,
+        "from_time": start_time.isoformat(),
+        "until_time": end_time.isoformat(),
+        "query_time": datetime.utcnow().isoformat(),
+    }
+
+    # IODA API endpoint for outage events
+    ioda_base_url = "https://api.ioda.inetintel.cc.gatech.edu/v2"
+    
+    # Build query parameters
+    params = {
+        "from": int(start_time.timestamp()),
+        "until": int(end_time.timestamp()),
+        "limit": limit,
+    }
+    
+    # Add entity filters if specified
+    if entity_type and entity_code:
+        params["entityType"] = entity_type
+        params["entityCode"] = entity_code.upper() if entity_type == "country" else entity_code
+    elif entity_type:
+        params["entityType"] = entity_type
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Query outage events endpoint
+            response = await client.get(
+                f"{ioda_base_url}/outages/events",
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("error"):
+                    return {
+                        "status": "error",
+                        "query_params": query_params,
+                        "outage_count": 0,
+                        "outages": [],
+                        "error_message": f"IODA API error: {data.get('error')}",
+                    }
+                
+                raw_outages = data.get("data", [])
+                
+                # Process and format outage events
+                outages = []
+                for event in raw_outages:
+                    # Parse location info
+                    location = event.get("location", "")
+                    location_parts = location.split("/") if location else ["unknown", "unknown"]
+                    loc_type = location_parts[0] if len(location_parts) > 0 else "unknown"
+                    loc_code = location_parts[1] if len(location_parts) > 1 else "unknown"
+                    
+                    # Calculate end time from start + duration
+                    start_ts = event.get("start", 0)
+                    duration = event.get("duration", 0)
+                    end_ts = start_ts + duration if start_ts and duration else None
+                    
+                    # Determine severity from score
+                    score = event.get("score", 0)
+                    if score >= 10000:
+                        severity = "critical"
+                    elif score >= 1000:
+                        severity = "high"
+                    elif score >= 100:
+                        severity = "medium"
+                    else:
+                        severity = "low"
+                    
+                    outages.append({
+                        "location": location,
+                        "location_name": event.get("location_name", loc_code),
+                        "location_type": loc_type,
+                        "location_code": loc_code,
+                        "datasource": event.get("datasource", "unknown"),
+                        "method": event.get("method", "unknown"),
+                        "score": score,
+                        "severity": severity,
+                        "start_time": datetime.utcfromtimestamp(start_ts).isoformat() if start_ts else None,
+                        "end_time": datetime.utcfromtimestamp(end_ts).isoformat() if end_ts else None,
+                        "duration_seconds": duration,
+                        "duration_human": _format_duration(duration) if duration else None,
+                        "status": "ongoing" if event.get("status") == 0 else "resolved",
+                    })
+                
+                # Sort by score (most severe first)
+                outages.sort(key=lambda x: x.get("score", 0), reverse=True)
+                
+                return {
+                    "status": "success",
+                    "query_params": query_params,
+                    "outage_count": len(outages),
+                    "outages": outages,
+                    "data_source": "IODA Outage Detection",
+                }
+            
+            elif response.status_code == 404:
+                return {
+                    "status": "success",
+                    "query_params": query_params,
+                    "outage_count": 0,
+                    "outages": [],
+                    "note": "No outages found for the specified criteria.",
+                    "data_source": "IODA Outage Detection",
+                }
+            else:
+                return {
+                    "status": "error",
+                    "query_params": query_params,
+                    "outage_count": 0,
+                    "outages": [],
+                    "error_message": f"IODA API returned HTTP {response.status_code}",
+                }
+
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "query_params": query_params,
+            "outage_count": 0,
+            "outages": [],
+            "error_message": "Request to IODA API timed out. Try again later.",
+        }
 
     except Exception as e:
         return {
             "status": "error",
             "query_params": query_params,
-            "error_message": f"Error querying Cloudflare Radar: {str(e)}",
+            "outage_count": 0,
+            "outages": [],
+            "error_message": f"Unexpected error querying IODA: {type(e).__name__}: {str(e)}",
         }
 
+
+def _format_duration(seconds: int) -> str:
+    """Format duration in seconds to human-readable string."""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes}m"
+    elif seconds < 86400:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    else:
+        days = seconds // 86400
+        hours = (seconds % 86400) // 3600
+        return f"{days}d {hours}h" if hours else f"{days}d"

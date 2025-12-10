@@ -608,6 +608,18 @@ Your report must ONLY contain information that has passed verification.
 - Note any conclusions that were flagged during verification
 - Be transparent about confidence adjustments made during verification
 
+## CRITICAL: Cite All Sources
+
+**EVERY claim, finding, or conclusion MUST cite its source(s).**
+
+When citing sources in the detailed_report:
+- For news articles: Include the source domain, title, and date. Example: "According to Reuters (2024-01-15), ..."
+- For satellite data: Include NASA FIRMS with coordinates and date. Example: "NASA FIRMS detected thermal anomalies at (48.46, 35.04) on 2024-01-15..."
+- For connectivity data: Include IODA with country/region. Example: "IODA reported connectivity disruptions in Ukraine on..."
+- For sanctions data: Include the sanctions database used. Example: "OFAC sanctions list indicates..."
+
+Use inline citations throughout the report. At the end of the detailed_report, include a "## Sources" section listing all sources used.
+
 ## Multi-Step Synthesis Process
 
 1. **Structure the narrative**: What's the most logical order to present findings?
@@ -619,10 +631,11 @@ Your report must ONLY contain information that has passed verification.
 ## Report Requirements
 
 1. Executive summary (2-3 sentences, key takeaways only)
-2. Detailed analysis with evidence citations
-3. Confidence levels for each major conclusion
-4. Clear statement of what data was NOT available
-5. Actionable recommendations
+2. Detailed analysis with INLINE SOURCE CITATIONS for every claim
+3. A "## Sources" section at the end of detailed_report listing all sources
+4. Confidence levels for each major conclusion
+5. Clear statement of what data was NOT available
+6. Actionable recommendations
 
 Use markdown formatting for the detailed report.
 """

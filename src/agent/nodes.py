@@ -3,6 +3,8 @@ Graph Nodes for the Deep Research Agent.
 
 Each node represents a step in the research process.
 Includes Multi-step Reasoning nodes for deeper analysis.
+
+Uses Pydantic schemas with `with_structured_output()` for reliable JSON responses.
 """
 
 import json
@@ -28,6 +30,17 @@ from src.agent.prompts import (
     VERIFICATION_PROMPT,
     ENHANCED_ANALYST_PROMPT,
     ENHANCED_SYNTHESIZER_PROMPT,
+)
+from src.agent.schemas import (
+    ResearchPlanOutput,
+    TaskDecompositionOutput,
+    HypothesisGenerationOutput,
+    HypothesisUpdateOutput,
+    AnalysisOutput,
+    ReflectionOutput,
+    CorrelationOutput,
+    VerificationOutput,
+    SynthesisOutput,
 )
 from src.shared.logger import get_logger, log_agent_step
 from src.shared.output_writer import get_output_writer
@@ -101,6 +114,85 @@ def _extract_thinking_block(response_text: str) -> tuple[str, str]:
     return thinking, main_response.strip()
 
 
+def _extract_json_with_logging(
+    response_content: str,
+    phase: str,
+    context: str = "",
+) -> tuple[dict[str, Any] | None, str | None]:
+    """
+    Extract JSON from LLM response with detailed logging.
+    
+    Args:
+        response_content: Raw response from LLM
+        phase: Current phase (for logging context)
+        context: Additional context about what we were trying to parse
+    
+    Returns:
+        Tuple of (parsed_dict, error_message). If parsing succeeds,
+        error_message is None. If parsing fails, parsed_dict is None.
+    """
+    writer = get_output_writer()
+    
+    # Extract thinking block first
+    thinking, main_response = _extract_thinking_block(response_content)
+    
+    # Log raw response for debugging
+    response_preview = response_content[:500] + "..." if len(response_content) > 500 else response_content
+    
+    # Try to extract JSON from code blocks
+    json_str = main_response
+    if "```json" in main_response:
+        json_str = main_response.split("```json")[1].split("```")[0]
+    elif "```" in main_response:
+        # Try to extract from generic code block
+        parts = main_response.split("```")
+        if len(parts) >= 2:
+            json_str = parts[1].split("```")[0]
+    
+    json_str = json_str.strip()
+    
+    # Check if we have any content to parse
+    if not json_str:
+        error_msg = f"Empty response from LLM (phase: {phase})"
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"   Raw response preview: {response_preview}")
+        writer.log_reasoning(
+            phase=phase,
+            step=0,
+            action="JSON parsing failed",
+            details={
+                "error": error_msg,
+                "raw_response_preview": response_preview,
+                "context": context,
+            },
+        )
+        return None, error_msg
+    
+    try:
+        result = json.loads(json_str)
+        return result, None
+    except json.JSONDecodeError as e:
+        error_msg = f"Failed to parse JSON in {phase}: {e}"
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"   JSON string attempted: {json_str[:300]}...")
+        logger.error(f"   Raw response preview: {response_preview}")
+        
+        # Log to file for debugging
+        writer.log_reasoning(
+            phase=phase,
+            step=0,
+            action="JSON parsing failed",
+            details={
+                "error": str(e),
+                "json_attempted": json_str[:500] if len(json_str) > 500 else json_str,
+                "raw_response_preview": response_preview,
+                "context": context,
+            },
+        )
+        
+        return None, error_msg
+
+
 # =============================================================================
 # Task Decomposition Node (Multi-step Reasoning)
 # =============================================================================
@@ -143,95 +235,95 @@ Analyze this task and decompose it into sub-tasks.
         HumanMessage(content=decomposition_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
+    thinking = ""
     try:
-        # Extract thinking if present
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        # Parse JSON response
-        if "```json" in main_response:
-            main_response = main_response.split("```json")[1].split("```")[0]
-        elif "```" in main_response:
-            main_response = main_response.split("```")[1].split("```")[0]
-        
-        result = json.loads(main_response.strip())
-        
-        # Build sub-tasks
-        sub_tasks = []
-        for st in result.get("sub_tasks", []):
-            sub_tasks.append({
-                "id": st.get("id", f"subtask_{len(sub_tasks) + 1}"),
-                "description": st.get("description", ""),
-                "parent_task": None,
-                "status": "pending",
-                "findings_ids": [],
-                "dependencies": st.get("dependencies", []),
-                "focus_area": st.get("focus_area", "thematic"),
-                "complexity": st.get("complexity", "moderate"),
-            })
-        
-        task_complexity = result.get("task_complexity", "moderate")
-        
-        logger.success(f"Task decomposed into {len(sub_tasks)} sub-tasks (complexity: {task_complexity})")
-        
-        # Log decomposition details
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(TaskDecompositionOutput)
+        output: TaskDecompositionOutput = await structured_llm.ainvoke(messages)
+        result = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        result, error = _extract_json_with_logging(
+            response.content,
             phase="decomposing",
-            prompt_summary=f"Decompose task: {state['task'][:100]}...",
-            response=json.dumps(result, indent=2),
+            context=f"Task: {state['task'][:100]}...",
         )
-        
-        if thinking:
-            writer.log_reasoning(
-                phase="decomposing",
-                step=state["iteration"] + 1,
-                action="Chain of thought",
-                details={"thinking": thinking},
-            )
-        
-        # Add reasoning step
-        reasoning_step = _add_reasoning_step(
-            state,
+        if error:
+            return {
+                "task_complexity": "simple",
+                "current_phase": ResearchPhase.PLANNING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+        thinking, _ = _extract_thinking_block(response.content)
+    
+    # Build sub-tasks
+    sub_tasks = []
+    for st in result.get("sub_tasks", []):
+        sub_tasks.append({
+            "id": st.get("id", f"subtask_{len(sub_tasks) + 1}"),
+            "description": st.get("description", ""),
+            "parent_task": None,
+            "status": "pending",
+            "findings_ids": [],
+            "dependencies": st.get("dependencies", []),
+            "focus_area": st.get("focus_area", "thematic"),
+            "complexity": st.get("complexity", "moderate"),
+        })
+    
+    task_complexity = result.get("task_complexity", "moderate")
+    
+    logger.success(f"Task decomposed into {len(sub_tasks)} sub-tasks (complexity: {task_complexity})")
+    
+    # Log decomposition details
+    writer.log_llm_response(
+        phase="decomposing",
+        prompt_summary=f"Decompose task: {state['task']}",
+        response=json.dumps(result, indent=2),
+    )
+    
+    if thinking:
+        writer.log_reasoning(
             phase="decomposing",
-            thought=result.get("decomposition_reasoning", "Task needs to be broken down"),
-            action=f"Decomposed into {len(sub_tasks)} sub-tasks",
-            observation=f"Identified sub-tasks: {[st['description'][:50] for st in sub_tasks]}",
-            conclusion=f"Task complexity: {task_complexity}",
-            confidence=0.85,
+            step=state["iteration"] + 1,
+            action="Chain of thought",
+            details={"thinking": thinking},
         )
-        
-        # Log summary
-        summary_lines = [f"[bold]Task Complexity:[/bold] {task_complexity}"]
-        for st in sub_tasks[:5]:
-            dep_str = f" (deps: {st['dependencies']})" if st['dependencies'] else ""
-            summary_lines.append(f"  • [{st['id']}] {st['description'][:60]}...{dep_str}")
-        
-        logger.panel("\n".join(summary_lines), title="📋 Task Decomposition", style="blue")
-        
-        # Determine next phase based on complexity
-        next_phase = ResearchPhase.HYPOTHESIZING.value if task_complexity in ["moderate", "complex"] else ResearchPhase.PLANNING.value
-        
-        return {
-            "sub_tasks": sub_tasks,
-            "current_sub_task_id": sub_tasks[0]["id"] if sub_tasks else None,
-            "task_complexity": task_complexity,
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "reasoning_depth": state.get("reasoning_depth", 0) + 1,
-            "chain_of_thought": state.get("chain_of_thought", []) + [thinking] if thinking else state.get("chain_of_thought", []),
-            "current_phase": next_phase,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse decomposition: {e}")
-        # Fall back to treating as a single task
-        return {
-            "task_complexity": "simple",
-            "current_phase": ResearchPhase.PLANNING.value,
-            "iteration": state["iteration"] + 1,
-        }
+    
+    # Add reasoning step
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="decomposing",
+        thought=result.get("decomposition_reasoning", "Task needs to be broken down"),
+        action=f"Decomposed into {len(sub_tasks)} sub-tasks",
+        observation=f"Identified sub-tasks: {[st['description'] for st in sub_tasks]}",
+        conclusion=f"Task complexity: {task_complexity}",
+        confidence=0.85,
+    )
+    
+    # Log summary
+    summary_lines = [f"[bold]Task Complexity:[/bold] {task_complexity}"]
+    for st in sub_tasks:
+        dep_str = f" (deps: {st['dependencies']})" if st['dependencies'] else ""
+        summary_lines.append(f"  • [{st['id']}] {st['description']}{dep_str}")
+    
+    logger.panel("\n".join(summary_lines), title="📋 Task Decomposition", style="blue")
+    
+    # Determine next phase based on complexity
+    next_phase = ResearchPhase.HYPOTHESIZING.value if task_complexity in ["moderate", "complex"] else ResearchPhase.PLANNING.value
+    
+    return {
+        "sub_tasks": sub_tasks,
+        "current_sub_task_id": sub_tasks[0]["id"] if sub_tasks else None,
+        "task_complexity": task_complexity,
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "reasoning_depth": state.get("reasoning_depth", 0) + 1,
+        "chain_of_thought": state.get("chain_of_thought", []) + [thinking] if thinking else state.get("chain_of_thought", []),
+        "current_phase": next_phase,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -291,100 +383,101 @@ Generate hypotheses that can be tested with these tools.
         HumanMessage(content=hypothesis_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        if "```json" in main_response:
-            main_response = main_response.split("```json")[1].split("```")[0]
-        elif "```" in main_response:
-            main_response = main_response.split("```")[1].split("```")[0]
-        
-        result = json.loads(main_response.strip())
-        
-        # Build hypotheses
-        hypotheses = []
-        test_queries = []
-        
-        for h in result.get("hypotheses", []):
-            hypothesis = {
-                "id": h.get("id", f"h{len(hypotheses) + 1}"),
-                "statement": h.get("statement", ""),
-                "status": HypothesisStatus.PROPOSED.value,
-                "confidence": h.get("initial_confidence", 0.5),
-                "supporting_evidence": [],
-                "contradicting_evidence": [],
-                "reasoning": "",
-                "supporting_criteria": h.get("supporting_evidence_criteria", []),
-                "refuting_criteria": h.get("refuting_evidence_criteria", []),
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
+        structured_llm = llm.with_structured_output(HypothesisGenerationOutput)
+        output: HypothesisGenerationOutput = await structured_llm.ainvoke(messages)
+        result = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        result, error = _extract_json_with_logging(
+            response.content,
+            phase="hypothesizing",
+            context=f"Task: {state['task'][:100]}...",
+        )
+        if error:
+            return {
+                "current_phase": ResearchPhase.PLANNING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
             }
-            hypotheses.append(hypothesis)
-            
-            # Collect test queries for this hypothesis
-            for q in h.get("test_queries", []):
-                q["hypothesis_id"] = hypothesis["id"]
-                test_queries.append(q)
-        
-        logger.success(f"Generated {len(hypotheses)} hypotheses with {len(test_queries)} test queries")
-        
-        # Log response
-        writer.log_llm_response(
-            phase="hypothesizing",
-            prompt_summary="Generate research hypotheses",
-            response=json.dumps(result, indent=2),
-        )
-        
-        # Log reasoning chain
-        reasoning_chain = result.get("reasoning_chain", [])
-        if reasoning_chain:
-            writer.log_reasoning(
-                phase="hypothesizing",
-                step=state["iteration"] + 1,
-                action="Reasoning chain",
-                details={"chain": reasoning_chain},
-            )
-        
-        # Add reasoning step
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="hypothesizing",
-            thought="\n".join(reasoning_chain) if reasoning_chain else "Forming hypotheses for investigation",
-            action=f"Generated {len(hypotheses)} hypotheses",
-            observation=f"Hypotheses: {[h['statement'][:50] for h in hypotheses]}",
-            conclusion=f"Ready to test with {len(test_queries)} queries",
-            confidence=0.7,
-        )
-        
-        # Log summary
-        summary_lines = ["[bold]Hypotheses:[/bold]"]
-        for h in hypotheses:
-            conf_bar = "█" * int(h["confidence"] * 10) + "░" * (10 - int(h["confidence"] * 10))
-            summary_lines.append(f"  [{h['id']}] {h['statement'][:60]}...")
-            summary_lines.append(f"      Confidence: [{conf_bar}] {h['confidence']:.0%}")
-        
-        logger.panel("\n".join(summary_lines), title="🔬 Research Hypotheses", style="cyan")
-        
-        return {
-            "hypotheses": state.get("hypotheses", []) + hypotheses,
-            "active_hypothesis_id": hypotheses[0]["id"] if hypotheses else None,
-            "pending_queries": test_queries[:5],  # Start with first 5 test queries
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "reasoning_depth": state.get("reasoning_depth", 0) + 1,
-            "chain_of_thought": state.get("chain_of_thought", []) + reasoning_chain,
-            "current_phase": ResearchPhase.GATHERING.value,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
+    
+    # Build hypotheses
+    hypotheses = []
+    test_queries = []
+    
+    for h in result.get("hypotheses", []):
+        hypothesis = {
+            "id": h.get("id", f"h{len(hypotheses) + 1}"),
+            "statement": h.get("statement", ""),
+            "status": HypothesisStatus.PROPOSED.value,
+            "confidence": h.get("initial_confidence", 0.5),
+            "supporting_evidence": [],
+            "contradicting_evidence": [],
+            "reasoning": "",
+            "supporting_criteria": h.get("supporting_evidence_criteria", []),
+            "refuting_criteria": h.get("refuting_evidence_criteria", []),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
         }
+        hypotheses.append(hypothesis)
         
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse hypotheses: {e}")
-        return {
-            "current_phase": ResearchPhase.PLANNING.value,
-            "iteration": state["iteration"] + 1,
-        }
+        # Collect test queries for this hypothesis
+        for q in h.get("test_queries", []):
+            q["hypothesis_id"] = hypothesis["id"]
+            test_queries.append(q)
+    
+    logger.success(f"Generated {len(hypotheses)} hypotheses with {len(test_queries)} test queries")
+    
+    # Log response
+    writer.log_llm_response(
+        phase="hypothesizing",
+        prompt_summary="Generate research hypotheses",
+        response=json.dumps(result, indent=2),
+    )
+    
+    # Log reasoning chain
+    reasoning_chain = result.get("reasoning_chain", [])
+    if reasoning_chain:
+        writer.log_reasoning(
+            phase="hypothesizing",
+            step=state["iteration"] + 1,
+            action="Reasoning chain",
+            details={"chain": reasoning_chain},
+        )
+    
+    # Add reasoning step
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="hypothesizing",
+        thought="\n".join(reasoning_chain) if reasoning_chain else "Forming hypotheses for investigation",
+        action=f"Generated {len(hypotheses)} hypotheses",
+        observation=f"Hypotheses: {[h['statement'] for h in hypotheses]}",
+        conclusion=f"Ready to test with {len(test_queries)} queries",
+        confidence=0.7,
+    )
+    
+    # Log summary
+    summary_lines = ["[bold]Hypotheses:[/bold]"]
+    for h in hypotheses:
+        conf_bar = "█" * int(h["confidence"] * 10) + "░" * (10 - int(h["confidence"] * 10))
+        summary_lines.append(f"  [{h['id']}] {h['statement']}")
+        summary_lines.append(f"      Confidence: [{conf_bar}] {h['confidence']:.0%}")
+    
+    logger.panel("\n".join(summary_lines), title="🔬 Research Hypotheses", style="cyan")
+    
+    return {
+        "hypotheses": state.get("hypotheses", []) + hypotheses,
+        "active_hypothesis_id": hypotheses[0]["id"] if hypotheses else None,
+        "pending_queries": test_queries[:5],  # Start with first 5 test queries
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "reasoning_depth": state.get("reasoning_depth", 0) + 1,
+        "chain_of_thought": state.get("chain_of_thought", []) + reasoning_chain,
+        "current_phase": ResearchPhase.GATHERING.value,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -443,84 +536,85 @@ Review each finding and update hypothesis confidence accordingly.
         HumanMessage(content=update_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        if "```json" in main_response:
-            main_response = main_response.split("```json")[1].split("```")[0]
-        elif "```" in main_response:
-            main_response = main_response.split("```")[1].split("```")[0]
-        
-        result = json.loads(main_response.strip())
-        
-        # Update hypotheses
-        updated_hypotheses = {h["id"]: h.copy() for h in hypotheses}
-        
-        for update in result.get("hypothesis_updates", []):
-            h_id = update.get("hypothesis_id")
-            if h_id in updated_hypotheses:
-                h = updated_hypotheses[h_id]
-                h["confidence"] = update.get("new_confidence", h["confidence"])
-                h["status"] = update.get("new_status", h["status"])
-                h["supporting_evidence"].extend(update.get("new_supporting_evidence", []))
-                h["contradicting_evidence"].extend(update.get("new_contradicting_evidence", []))
-                h["reasoning"] = update.get("confidence_change_reason", "")
-                h["updated_at"] = datetime.utcnow().isoformat()
-        
-        updated_list = list(updated_hypotheses.values())
-        
-        # Log response
-        writer.log_llm_response(
-            phase="hypothesizing",
-            prompt_summary="Update hypotheses with evidence",
-            response=json.dumps(result, indent=2),
-        )
-        
-        # Add reasoning step
-        reasoning_chain = result.get("reasoning_chain", [])
-        reasoning_step = _add_reasoning_step(
-            state,
+        structured_llm = llm.with_structured_output(HypothesisUpdateOutput)
+        output: HypothesisUpdateOutput = await structured_llm.ainvoke(messages)
+        result = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        result, error = _extract_json_with_logging(
+            response.content,
             phase="hypothesis_update",
-            thought="\n".join(reasoning_chain) if reasoning_chain else "Evaluating evidence against hypotheses",
-            action="Updated hypothesis confidence scores",
-            observation=f"Updates: {len(result.get('hypothesis_updates', []))}",
-            conclusion="Hypotheses updated based on evidence",
-            confidence=0.8,
+            context=f"Updating {len(hypotheses)} hypotheses with {len(findings)} findings",
         )
-        
-        # Log summary
-        summary_lines = ["[bold]Hypothesis Updates:[/bold]"]
-        for h in updated_list:
-            status_emoji = {
-                "supported": "✅",
-                "refuted": "❌",
-                "investigating": "🔍",
-                "inconclusive": "❓",
-                "proposed": "📝",
-            }.get(h["status"], "📝")
-            conf_bar = "█" * int(h["confidence"] * 10) + "░" * (10 - int(h["confidence"] * 10))
-            summary_lines.append(f"  {status_emoji} [{h['id']}] {h['statement'][:50]}...")
-            summary_lines.append(f"      Confidence: [{conf_bar}] {h['confidence']:.0%}")
-        
-        logger.panel("\n".join(summary_lines), title="📊 Hypothesis Status", style="yellow")
-        
-        return {
-            "hypotheses": updated_list,
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "chain_of_thought": state.get("chain_of_thought", []) + reasoning_chain,
-            "current_phase": ResearchPhase.ANALYZING.value,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse hypothesis updates: {e}")
-        return {
-            "current_phase": ResearchPhase.ANALYZING.value,
-            "iteration": state["iteration"] + 1,
-        }
+        if error:
+            return {
+                "current_phase": ResearchPhase.ANALYZING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+    
+    # Update hypotheses
+    updated_hypotheses = {h["id"]: h.copy() for h in hypotheses}
+    
+    for update in result.get("hypothesis_updates", []):
+        h_id = update.get("hypothesis_id")
+        if h_id in updated_hypotheses:
+            h = updated_hypotheses[h_id]
+            h["confidence"] = update.get("new_confidence", h["confidence"])
+            h["status"] = update.get("new_status", h["status"])
+            h["supporting_evidence"].extend(update.get("new_supporting_evidence", []))
+            h["contradicting_evidence"].extend(update.get("new_contradicting_evidence", []))
+            h["reasoning"] = update.get("confidence_change_reason", "")
+            h["updated_at"] = datetime.utcnow().isoformat()
+    
+    updated_list = list(updated_hypotheses.values())
+    
+    # Log response
+    writer.log_llm_response(
+        phase="hypothesizing",
+        prompt_summary="Update hypotheses with evidence",
+        response=json.dumps(result, indent=2),
+    )
+    
+    # Add reasoning step
+    reasoning_chain = result.get("reasoning_chain", [])
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="hypothesis_update",
+        thought="\n".join(reasoning_chain) if reasoning_chain else "Evaluating evidence against hypotheses",
+        action="Updated hypothesis confidence scores",
+        observation=f"Updates: {len(result.get('hypothesis_updates', []))}",
+        conclusion="Hypotheses updated based on evidence",
+        confidence=0.8,
+    )
+    
+    # Log summary
+    summary_lines = ["[bold]Hypothesis Updates:[/bold]"]
+    for h in updated_list:
+        status_emoji = {
+            "supported": "✅",
+            "refuted": "❌",
+            "investigating": "🔍",
+            "inconclusive": "❓",
+            "proposed": "📝",
+        }.get(h["status"], "📝")
+        conf_bar = "█" * int(h["confidence"] * 10) + "░" * (10 - int(h["confidence"] * 10))
+        summary_lines.append(f"  {status_emoji} [{h['id']}] {h['statement']}")
+        summary_lines.append(f"      Confidence: [{conf_bar}] {h['confidence']:.0%}")
+    
+    logger.panel("\n".join(summary_lines), title="📊 Hypothesis Status", style="yellow")
+    
+    return {
+        "hypotheses": updated_list,
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "chain_of_thought": state.get("chain_of_thought", []) + reasoning_chain,
+        "current_phase": ResearchPhase.ANALYZING.value,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -581,97 +675,98 @@ Critically reflect on this analysis. Be thorough but constructive.
         HumanMessage(content=reflection_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        if "```json" in main_response:
-            main_response = main_response.split("```json")[1].split("```")[0]
-        elif "```" in main_response:
-            main_response = main_response.split("```")[1].split("```")[0]
-        
-        result = json.loads(main_response.strip())
-        
-        # Build reflection notes
-        reflection_notes = []
-        for note in result.get("reflection_notes", []):
-            reflection_notes.append({
-                "category": note.get("category", "gap_analysis"),
-                "content": note.get("content", ""),
-                "severity": note.get("severity", "info"),
-                "action_required": note.get("action_required", False),
-                "suggested_action": note.get("suggested_action"),
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-        
-        needs_investigation = result.get("needs_more_investigation", False)
-        investigation_queries = result.get("investigation_suggestions", [])
-        
-        # Log response
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(ReflectionOutput)
+        output: ReflectionOutput = await structured_llm.ainvoke(messages)
+        result = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        result, error = _extract_json_with_logging(
+            response.content,
             phase="reflecting",
-            prompt_summary="Self-reflection on analysis",
-            response=json.dumps(result, indent=2),
+            context=f"Reflecting on {len(state.get('key_insights', []))} insights",
         )
-        
-        # Add reasoning step
-        reflection_chain = result.get("reflection_chain", [])
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="reflecting",
-            thought="\n".join(reflection_chain) if reflection_chain else "Examining analysis for biases and gaps",
-            action=f"Generated {len(reflection_notes)} reflection notes",
-            observation=f"Critical issues: {sum(1 for n in reflection_notes if n['severity'] == 'critical')}",
-            conclusion="Needs more investigation" if needs_investigation else "Analysis is robust",
-            confidence=0.75,
-        )
-        
-        # Log summary with severity-based formatting
-        summary_lines = ["[bold]Reflection Results:[/bold]"]
-        severity_counts = {"info": 0, "warning": 0, "critical": 0}
-        
-        for note in reflection_notes:
-            severity_counts[note["severity"]] = severity_counts.get(note["severity"], 0) + 1
-            emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(note["severity"], "📝")
-            summary_lines.append(f"  {emoji} [{note['category']}] {note['content'][:60]}...")
-            if note["action_required"] and note["suggested_action"]:
-                summary_lines.append(f"      → Action: {note['suggested_action'][:50]}...")
-        
-        summary_lines.append(f"\n[bold]Summary:[/bold] {severity_counts['critical']} critical, {severity_counts['warning']} warnings, {severity_counts['info']} info")
-        
-        style = "red" if severity_counts["critical"] > 0 else "yellow" if severity_counts["warning"] > 0 else "green"
-        logger.panel("\n".join(summary_lines), title="🪞 Self-Reflection", style=style)
-        
-        # Determine next phase
-        if needs_investigation and investigation_queries and state.get("reflection_iterations", 0) < 2:
-            next_phase = ResearchPhase.GATHERING.value
-            pending = investigation_queries[:3]
-        elif any(n["severity"] == "critical" and n["action_required"] for n in reflection_notes):
-            next_phase = ResearchPhase.ANALYZING.value
-            pending = state.get("pending_queries", [])
-        else:
-            next_phase = ResearchPhase.CORRELATING.value
-            pending = state.get("pending_queries", [])
-        
-        return {
-            "reflection_notes": state.get("reflection_notes", []) + reflection_notes,
-            "reflection_iterations": state.get("reflection_iterations", 0) + 1,
-            "needs_more_reflection": needs_investigation,
-            "pending_queries": pending,
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "chain_of_thought": state.get("chain_of_thought", []) + reflection_chain,
-            "current_phase": next_phase,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse reflection: {e}")
-        return {
-            "current_phase": ResearchPhase.CORRELATING.value,
-            "iteration": state["iteration"] + 1,
-        }
+        if error:
+            return {
+                "current_phase": ResearchPhase.CORRELATING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+    
+    # Build reflection notes
+    reflection_notes = []
+    for note in result.get("reflection_notes", []):
+        reflection_notes.append({
+            "category": note.get("category", "gap_analysis"),
+            "content": note.get("content", ""),
+            "severity": note.get("severity", "info"),
+            "action_required": note.get("action_required", False),
+            "suggested_action": note.get("suggested_action"),
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+    
+    needs_investigation = result.get("needs_more_investigation", False)
+    investigation_queries = result.get("investigation_suggestions", [])
+    
+    # Log response
+    writer.log_llm_response(
+        phase="reflecting",
+        prompt_summary="Self-reflection on analysis",
+        response=json.dumps(result, indent=2),
+    )
+    
+    # Add reasoning step
+    reflection_chain = result.get("reflection_chain", [])
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="reflecting",
+        thought="\n".join(reflection_chain) if reflection_chain else "Examining analysis for biases and gaps",
+        action=f"Generated {len(reflection_notes)} reflection notes",
+        observation=f"Critical issues: {sum(1 for n in reflection_notes if n['severity'] == 'critical')}",
+        conclusion="Needs more investigation" if needs_investigation else "Analysis is robust",
+        confidence=0.75,
+    )
+    
+    # Log summary with severity-based formatting
+    summary_lines = ["[bold]Reflection Results:[/bold]"]
+    severity_counts = {"info": 0, "warning": 0, "critical": 0}
+    
+    for note in reflection_notes:
+        severity_counts[note["severity"]] = severity_counts.get(note["severity"], 0) + 1
+        emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(note["severity"], "📝")
+        summary_lines.append(f"  {emoji} [{note['category']}] {note['content']}")
+        if note["action_required"] and note["suggested_action"]:
+            summary_lines.append(f"      → Action: {note['suggested_action']}")
+    
+    summary_lines.append(f"\n[bold]Summary:[/bold] {severity_counts['critical']} critical, {severity_counts['warning']} warnings, {severity_counts['info']} info")
+    
+    style = "red" if severity_counts["critical"] > 0 else "yellow" if severity_counts["warning"] > 0 else "green"
+    logger.panel("\n".join(summary_lines), title="🪞 Self-Reflection", style=style)
+    
+    # Determine next phase
+    if needs_investigation and investigation_queries and state.get("reflection_iterations", 0) < 2:
+        next_phase = ResearchPhase.GATHERING.value
+        pending = investigation_queries[:3]
+    elif any(n["severity"] == "critical" and n["action_required"] for n in reflection_notes):
+        next_phase = ResearchPhase.ANALYZING.value
+        pending = state.get("pending_queries", [])
+    else:
+        next_phase = ResearchPhase.CORRELATING.value
+        pending = state.get("pending_queries", [])
+    
+    return {
+        "reflection_notes": state.get("reflection_notes", []) + reflection_notes,
+        "reflection_iterations": state.get("reflection_iterations", 0) + 1,
+        "needs_more_reflection": needs_investigation,
+        "pending_queries": pending,
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "chain_of_thought": state.get("chain_of_thought", []) + reflection_chain,
+        "current_phase": next_phase,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -728,123 +823,124 @@ Verify each conclusion against the evidence.
         HumanMessage(content=verification_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        if "```json" in main_response:
-            main_response = main_response.split("```json")[1].split("```")[0]
-        elif "```" in main_response:
-            main_response = main_response.split("```")[1].split("```")[0]
-        
-        result = json.loads(main_response.strip())
-        
-        # Process verification results
-        verification_results = []
-        verified_insights = []
-        verified_correlations = []
-        
-        # Process insight verifications
-        for iv in result.get("insight_verifications", []):
-            verification_results.append({
-                "item_type": "insight",
-                "item_id": iv.get("insight_index", 0),
-                "is_consistent": iv.get("verdict") in ["pass", "adjust"],
-                "issues_found": iv.get("issues", []),
-                "confidence_adjustment": 0.0 if iv.get("verdict") == "pass" else -0.1,
-                "verification_notes": iv.get("evidence_check", ""),
-            })
-            
-            if iv.get("verdict") in ["pass", "adjust"]:
-                # Use revised insight if available, otherwise original
-                insight_text = iv.get("revised_insight") or iv.get("original_insight", "")
-                if insight_text:
-                    verified_insights.append(insight_text)
-        
-        # Process correlation verifications
-        for cv in result.get("correlation_verifications", []):
-            verification_results.append({
-                "item_type": "correlation",
-                "item_id": cv.get("correlation_index", 0),
-                "is_consistent": cv.get("verdict") in ["pass", "adjust"],
-                "issues_found": cv.get("issues", []),
-                "confidence_adjustment": 0.0,
-                "verification_notes": f"Temporal: {cv.get('temporal_check', 'N/A')}, Spatial: {cv.get('spatial_check', 'N/A')}",
-            })
-            
-            if cv.get("verdict") in ["pass", "adjust"]:
-                # Get the original correlation and update its confidence
-                corr_idx = cv.get("correlation_index", 0)
-                correlations = state.get("correlations", [])
-                if corr_idx < len(correlations):
-                    verified_corr = correlations[corr_idx].copy()
-                    verified_corr["confidence"] = cv.get("suggested_confidence", verified_corr.get("confidence", "medium"))
-                    verified_correlations.append(verified_corr)
-        
-        # Log response
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(VerificationOutput)
+        output: VerificationOutput = await structured_llm.ainvoke(messages)
+        result = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        result, error = _extract_json_with_logging(
+            response.content,
             phase="verifying",
-            prompt_summary="Verify conclusions before synthesis",
-            response=json.dumps(result, indent=2),
+            context=f"Verifying {len(state.get('key_insights', []))} insights and {len(state.get('correlations', []))} correlations",
         )
+        if error:
+            return {
+                "verified_insights": state.get("key_insights", []),
+                "verified_correlations": state.get("correlations", []),
+                "current_phase": ResearchPhase.SYNTHESIZING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+    
+    # Process verification results
+    verification_results = []
+    verified_insights = []
+    verified_correlations = []
+    
+    # Process insight verifications
+    for iv in result.get("insight_verifications", []):
+        verification_results.append({
+            "item_type": "insight",
+            "item_id": iv.get("insight_index", 0),
+            "is_consistent": iv.get("verdict") in ["pass", "adjust"],
+            "issues_found": iv.get("issues", []),
+            "confidence_adjustment": 0.0 if iv.get("verdict") == "pass" else -0.1,
+            "verification_notes": iv.get("evidence_check", ""),
+        })
         
-        # Add reasoning step
-        verification_chain = result.get("verification_chain", [])
-        overall = result.get("overall_assessment", {})
+        if iv.get("verdict") in ["pass", "adjust"]:
+            # Use revised insight if available, otherwise original
+            insight_text = iv.get("revised_insight") or iv.get("original_insight", "")
+            if insight_text:
+                verified_insights.append(insight_text)
+    
+    # Process correlation verifications
+    for cv in result.get("correlation_verifications", []):
+        verification_results.append({
+            "item_type": "correlation",
+            "item_id": cv.get("correlation_index", 0),
+            "is_consistent": cv.get("verdict") in ["pass", "adjust"],
+            "issues_found": cv.get("issues", []),
+            "confidence_adjustment": 0.0,
+            "verification_notes": f"Temporal: {cv.get('temporal_check', 'N/A')}, Spatial: {cv.get('spatial_check', 'N/A')}",
+        })
         
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="verifying",
-            thought="\n".join(verification_chain) if verification_chain else "Verifying all conclusions",
-            action=f"Verified {len(verification_results)} items",
-            observation=f"Passed: {sum(1 for v in verification_results if v['is_consistent'])}, Failed: {sum(1 for v in verification_results if not v['is_consistent'])}",
-            conclusion="Ready for synthesis" if overall.get("ready_for_synthesis") else "Issues need addressing",
-            confidence=0.85,
-        )
-        
-        # Log summary
-        passed = sum(1 for v in verification_results if v["is_consistent"])
-        failed = len(verification_results) - passed
-        
-        summary_lines = [
-            f"[bold]Verification Results:[/bold]",
-            f"  ✅ Passed: {passed}",
-            f"  ❌ Failed/Flagged: {failed}",
-            f"  📝 Verified Insights: {len(verified_insights)}",
-            f"  🔗 Verified Correlations: {len(verified_correlations)}",
-        ]
-        
-        if overall.get("critical_issues"):
-            summary_lines.append("\n[bold]Critical Issues:[/bold]")
-            for issue in overall["critical_issues"][:3]:
-                summary_lines.append(f"  🚨 {issue}")
-        
-        style = "green" if overall.get("ready_for_synthesis") else "yellow"
-        logger.panel("\n".join(summary_lines), title="✓ Verification Complete", style=style)
-        
-        # Determine next phase
-        next_phase = ResearchPhase.SYNTHESIZING.value if overall.get("ready_for_synthesis", True) else ResearchPhase.REFLECTING.value
-        
-        return {
-            "verification_results": state.get("verification_results", []) + verification_results,
-            "verified_insights": verified_insights if verified_insights else state.get("key_insights", []),
-            "verified_correlations": verified_correlations if verified_correlations else state.get("correlations", []),
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "chain_of_thought": state.get("chain_of_thought", []) + verification_chain,
-            "current_phase": next_phase,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse verification: {e}")
-        return {
-            "verified_insights": state.get("key_insights", []),
-            "verified_correlations": state.get("correlations", []),
-            "current_phase": ResearchPhase.SYNTHESIZING.value,
-            "iteration": state["iteration"] + 1,
-        }
+        if cv.get("verdict") in ["pass", "adjust"]:
+            # Get the original correlation and update its confidence
+            corr_idx = cv.get("correlation_index", 0)
+            correlations = state.get("correlations", [])
+            if corr_idx < len(correlations):
+                verified_corr = correlations[corr_idx].copy()
+                verified_corr["confidence"] = cv.get("suggested_confidence", verified_corr.get("confidence", "medium"))
+                verified_correlations.append(verified_corr)
+    
+    # Log response
+    writer.log_llm_response(
+        phase="verifying",
+        prompt_summary="Verify conclusions before synthesis",
+        response=json.dumps(result, indent=2),
+    )
+    
+    # Add reasoning step
+    verification_chain = result.get("verification_chain", [])
+    overall = result.get("overall_assessment", {})
+    
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="verifying",
+        thought="\n".join(verification_chain) if verification_chain else "Verifying all conclusions",
+        action=f"Verified {len(verification_results)} items",
+        observation=f"Passed: {sum(1 for v in verification_results if v['is_consistent'])}, Failed: {sum(1 for v in verification_results if not v['is_consistent'])}",
+        conclusion="Ready for synthesis" if overall.get("ready_for_synthesis") else "Issues need addressing",
+        confidence=0.85,
+    )
+    
+    # Log summary
+    passed = sum(1 for v in verification_results if v["is_consistent"])
+    failed = len(verification_results) - passed
+    
+    summary_lines = [
+        f"[bold]Verification Results:[/bold]",
+        f"  ✅ Passed: {passed}",
+        f"  ❌ Failed/Flagged: {failed}",
+        f"  📝 Verified Insights: {len(verified_insights)}",
+        f"  🔗 Verified Correlations: {len(verified_correlations)}",
+    ]
+    
+    if overall.get("critical_issues"):
+        summary_lines.append("\n[bold]Critical Issues:[/bold]")
+        for issue in overall["critical_issues"]:
+            summary_lines.append(f"  🚨 {issue}")
+    
+    style = "green" if overall.get("ready_for_synthesis") else "yellow"
+    logger.panel("\n".join(summary_lines), title="✓ Verification Complete", style=style)
+    
+    # Determine next phase
+    next_phase = ResearchPhase.SYNTHESIZING.value if overall.get("ready_for_synthesis", True) else ResearchPhase.REFLECTING.value
+    
+    return {
+        "verification_results": state.get("verification_results", []) + verification_results,
+        "verified_insights": verified_insights if verified_insights else state.get("key_insights", []),
+        "verified_correlations": verified_correlations if verified_correlations else state.get("correlations", []),
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "chain_of_thought": state.get("chain_of_thought", []) + verification_chain,
+        "current_phase": next_phase,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -885,21 +981,7 @@ async def plan_research(
 ## Available Tools
 {json.dumps(get_tool_definitions(), indent=2)}
 
-Create a research plan as JSON with this structure:
-{{
-    "objectives": ["objective 1", "objective 2"],
-    "regions_of_interest": ["Ukraine", "Russia"],
-    "keywords": ["military", "strike", "drone"],
-    "coordinates": [{{"lat": 50.45, "lon": 30.52, "radius_km": 100}}],
-    "time_range": "7d",
-    "priority_sources": ["news", "satellite", "cyber"],
-    "initial_queries": [
-        {{"tool": "search_news", "args": {{"keywords": "...", "country_code": "..."}}}},
-        ...
-    ]
-}}
-
-Respond ONLY with the JSON, no other text.
+Create a comprehensive research plan based on the task and available tools.
 """
     
     messages = [
@@ -907,80 +989,81 @@ Respond ONLY with the JSON, no other text.
         HumanMessage(content=planning_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        # Parse the research plan
-        plan_text = response.content
-        # Clean up potential markdown code blocks
-        if "```json" in plan_text:
-            plan_text = plan_text.split("```json")[1].split("```")[0]
-        elif "```" in plan_text:
-            plan_text = plan_text.split("```")[1].split("```")[0]
-        
-        plan = json.loads(plan_text.strip())
-        
-        # Log the research plan details
-        logger.success(f"Research plan created with {len(plan.get('initial_queries', []))} initial queries")
-        
-        # Log LLM response to reasoning file
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(ResearchPlanOutput)
+        result: ResearchPlanOutput = await structured_llm.ainvoke(messages)
+        plan = result.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        # Fallback to manual JSON extraction
+        response = await llm.ainvoke(messages)
+        plan, error = _extract_json_with_logging(
+            response.content,
             phase="planning",
-            prompt_summary=f"Create research plan for: {state['task'][:100]}...",
-            response=json.dumps(plan, indent=2),
+            context=f"Task: {state['task'][:100]}...",
         )
-        
-        # Show plan details
-        plan_summary = []
-        if plan.get("objectives"):
-            plan_summary.append(f"[bold]Objectives:[/bold] {len(plan['objectives'])}")
-            for obj in plan["objectives"][:3]:
-                plan_summary.append(f"  • {obj}")
-        if plan.get("regions_of_interest"):
-            plan_summary.append(f"[bold]Regions:[/bold] {', '.join(plan['regions_of_interest'][:5])}")
-        if plan.get("keywords"):
-            plan_summary.append(f"[bold]Keywords:[/bold] {', '.join(plan['keywords'][:5])}")
-        if plan.get("priority_sources"):
-            plan_summary.append(f"[bold]Data Sources:[/bold] {', '.join(plan['priority_sources'])}")
-        if plan.get("initial_queries"):
-            plan_summary.append(f"[bold]Planned Queries:[/bold]")
-            for q in plan["initial_queries"][:5]:
-                plan_summary.append(f"  • {q.get('tool')}({', '.join(f'{k}={v}' for k,v in q.get('args', {}).items())})")
-        
-        logger.panel("\n".join(plan_summary), title="📋 Research Plan", style="cyan")
-        
-        # Add reasoning step for planning
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="planning",
-            thought=f"Planning research approach for: {state['task'][:100]}",
-            action="Created comprehensive research plan",
-            observation=f"Planned {len(plan.get('initial_queries', []))} initial queries across {len(plan.get('priority_sources', []))} sources",
-            conclusion="Ready to proceed with task decomposition",
-            confidence=0.8,
-        )
-        
-        # Start with task decomposition for multi-step reasoning
-        # This allows the agent to break down complex tasks before gathering
-        return {
-            "research_plan": plan,
-            "pending_queries": plan.get("initial_queries", []),
-            "current_phase": ResearchPhase.DECOMPOSING.value,  # Start with decomposition
-            "iteration": state["iteration"] + 1,
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "reasoning_depth": state.get("reasoning_depth", 0) + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-            "messages": [
-                HumanMessage(content=state["task"]),
-                AIMessage(content=f"Research plan created: {json.dumps(plan, indent=2)}"),
-            ],
-        }
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse research plan: {e}")
-        return {
-            "error": f"Failed to parse research plan: {e}",
-            "current_phase": ResearchPhase.COMPLETE.value,
-        }
+        if error:
+            return {
+                "error": error,
+                "current_phase": ResearchPhase.COMPLETE.value,
+            }
+    
+    # Log the research plan details
+    logger.success(f"Research plan created with {len(plan.get('initial_queries', []))} initial queries")
+    
+    # Log LLM response to reasoning file
+    writer.log_llm_response(
+        phase="planning",
+        prompt_summary=f"Create research plan for: {state['task']}",
+        response=json.dumps(plan, indent=2),
+    )
+    
+    # Show plan details
+    plan_summary = []
+    if plan.get("objectives"):
+        plan_summary.append(f"[bold]Objectives:[/bold] {len(plan['objectives'])}")
+        for obj in plan["objectives"]:
+            plan_summary.append(f"  • {obj}")
+    if plan.get("regions_of_interest"):
+        plan_summary.append(f"[bold]Regions:[/bold] {', '.join(plan['regions_of_interest'])}")
+    if plan.get("keywords"):
+        plan_summary.append(f"[bold]Keywords:[/bold] {', '.join(plan['keywords'])}")
+    if plan.get("priority_sources"):
+        plan_summary.append(f"[bold]Data Sources:[/bold] {', '.join(plan['priority_sources'])}")
+    if plan.get("initial_queries"):
+        plan_summary.append(f"[bold]Planned Queries:[/bold]")
+        for q in plan["initial_queries"]:
+            plan_summary.append(f"  • {q.get('tool')}({', '.join(f'{k}={v}' for k,v in q.get('args', {}).items())})")
+    
+    logger.panel("\n".join(plan_summary), title="📋 Research Plan", style="cyan")
+    
+    # Add reasoning step for planning
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="planning",
+        thought=f"Planning research approach for: {state['task']}",
+        action="Created comprehensive research plan",
+        observation=f"Planned {len(plan.get('initial_queries', []))} initial queries across {len(plan.get('priority_sources', []))} sources",
+        conclusion="Ready to proceed with task decomposition",
+        confidence=0.8,
+    )
+    
+    # Start with task decomposition for multi-step reasoning
+    # This allows the agent to break down complex tasks before gathering
+    return {
+        "research_plan": plan,
+        "pending_queries": plan.get("initial_queries", []),
+        "current_phase": ResearchPhase.DECOMPOSING.value,  # Start with decomposition
+        "iteration": state["iteration"] + 1,
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "reasoning_depth": state.get("reasoning_depth", 0) + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+        "messages": [
+            HumanMessage(content=state["task"]),
+            AIMessage(content=f"Research plan created: {json.dumps(plan, indent=2)}"),
+        ],
+    }
 
 
 # =============================================================================
@@ -1094,16 +1177,16 @@ def _log_tool_result_summary(tool_name: str, result: dict[str, Any]) -> None:
         articles = result.get("articles", [])
         if articles:
             summary_lines.append(f"[bold]Found {len(articles)} articles:[/bold]")
-            for article in articles[:3]:
-                title = article.get("title", "No title")[:60]
+            for article in articles:
+                title = article.get("title", "No title")
                 source = article.get("domain", "unknown")
-                summary_lines.append(f"  • [{source}] {title}...")
+                summary_lines.append(f"  • [{source}] {title}")
     
     elif tool_name == "detect_thermal_anomalies":
         count = result.get("anomaly_count", 0)
         if count > 0:
             summary_lines.append(f"[bold]Detected {count} thermal anomalies[/bold]")
-            anomalies = result.get("anomalies", [])[:3]
+            anomalies = result.get("anomalies", [])
             for a in anomalies:
                 summary_lines.append(
                     f"  • ({a.get('latitude'):.2f}, {a.get('longitude'):.2f}) "
@@ -1124,7 +1207,7 @@ def _log_tool_result_summary(tool_name: str, result: dict[str, Any]) -> None:
         entities = result.get("entities", [])
         if entities:
             summary_lines.append(f"[bold]Found {len(entities)} sanctioned entities[/bold]")
-            for e in entities[:3]:
+            for e in entities:
                 summary_lines.append(f"  • {e.get('name')} ({e.get('entity_type')})")
     
     if summary_lines:
@@ -1142,7 +1225,7 @@ def _extract_findings(
     
     if tool_name == "search_news":
         articles = result.get("articles", [])
-        for article in articles[:10]:  # Limit to top 10
+        for article in articles:
             findings.append({
                 "source": article.get("domain", "unknown"),
                 "source_type": IntelligenceType.NEWS.value,
@@ -1160,7 +1243,7 @@ def _extract_findings(
     
     elif tool_name == "detect_thermal_anomalies":
         anomalies = result.get("anomalies", [])
-        for anomaly in anomalies[:20]:
+        for anomaly in anomalies:
             findings.append({
                 "source": "NASA FIRMS",
                 "source_type": IntelligenceType.SATELLITE.value,
@@ -1340,109 +1423,110 @@ Respond as JSON:
         HumanMessage(content=analysis_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
+    thinking = ""
     try:
-        # Extract thinking block if present
-        thinking, main_response = _extract_thinking_block(response.content)
-        
-        analysis_text = main_response
-        if "```json" in analysis_text:
-            analysis_text = analysis_text.split("```json")[1].split("```")[0]
-        elif "```" in analysis_text:
-            analysis_text = analysis_text.split("```")[1].split("```")[0]
-        
-        analysis = json.loads(analysis_text.strip())
-        
-        # Extract thinking from JSON if not found in block
+        structured_llm = llm.with_structured_output(AnalysisOutput)
+        output: AnalysisOutput = await structured_llm.ainvoke(messages)
+        analysis = output.model_dump()
+        thinking = analysis.get("thinking", "")
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        thinking, _ = _extract_thinking_block(response.content)
+        analysis, error = _extract_json_with_logging(
+            response.content,
+            phase="analyzing",
+            context=f"Analyzing {len(findings)} findings",
+        )
+        if error:
+            return {
+                "current_phase": ResearchPhase.SYNTHESIZING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
         analysis_thinking = analysis.get("thinking", "")
         if not thinking and analysis_thinking:
             thinking = analysis_thinking
-        
-        # Check if follow-up queries are needed
-        follow_up = analysis.get("follow_up_queries", [])
-        # Use REFLECTING phase for multi-step reasoning instead of going directly to CORRELATING
-        next_phase = ResearchPhase.GATHERING.value if follow_up else ResearchPhase.REFLECTING.value
-        
-        logger.success(f"Analysis complete: {len(analysis.get('key_insights', []))} insights")
-        
-        # Log LLM response to reasoning file
-        writer.log_llm_response(
+    
+    # Check if follow-up queries are needed
+    follow_up = analysis.get("follow_up_queries", [])
+    # Use REFLECTING phase for multi-step reasoning instead of going directly to CORRELATING
+    next_phase = ResearchPhase.GATHERING.value if follow_up else ResearchPhase.REFLECTING.value
+    
+    logger.success(f"Analysis complete: {len(analysis.get('key_insights', []))} insights")
+    
+    # Log LLM response to reasoning file
+    writer.log_llm_response(
+        phase="analyzing",
+        prompt_summary=f"Analyze {len(state.get('findings', []))} findings",
+        response=json.dumps(analysis, indent=2),
+    )
+    
+    # Log thinking/reasoning chain
+    if thinking:
+        writer.log_reasoning(
             phase="analyzing",
-            prompt_summary=f"Analyze {len(state.get('findings', []))} findings",
-            response=json.dumps(analysis, indent=2),
+            step=state["iteration"] + 1,
+            action="Chain of thought reasoning",
+            details={"thinking": thinking},
         )
-        
-        # Log thinking/reasoning chain
-        if thinking:
-            writer.log_reasoning(
-                phase="analyzing",
-                step=state["iteration"] + 1,
-                action="Chain of thought reasoning",
-                details={"thinking": thinking},
-            )
-        
-        # Add reasoning step
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="analyzing",
-            thought=thinking if thinking else "Analyzing patterns in collected evidence",
-            action=f"Identified {len(analysis.get('key_insights', []))} insights",
-            observation=f"Found {len(analysis.get('correlations', []))} correlations, {len(analysis.get('uncertainties', []))} uncertainties",
-            conclusion="Analysis complete, proceeding to reflection" if not follow_up else f"Need {len(follow_up)} more queries",
-            confidence=0.75,
-        )
-        
-        # Log analysis details
-        analysis_summary = []
-        if analysis.get("key_insights"):
-            analysis_summary.append("[bold]Key Insights:[/bold]")
-            for insight in analysis["key_insights"][:5]:
-                if isinstance(insight, dict):
-                    analysis_summary.append(f"  • {insight.get('description', str(insight))}")
-                else:
-                    analysis_summary.append(f"  • {insight[:100]}..." if len(str(insight)) > 100 else f"  • {insight}")
-        
-        # Show hypothesis implications if present
-        if analysis.get("hypothesis_implications"):
-            analysis_summary.append(f"[bold]Hypothesis Implications:[/bold]")
-            for hi in analysis["hypothesis_implications"][:3]:
-                emoji = {"supporting": "✅", "contradicting": "❌", "neutral": "➖"}.get(hi.get("evidence_type", "neutral"), "➖")
-                analysis_summary.append(f"  {emoji} [{hi.get('hypothesis_id')}] {hi.get('explanation', '')[:50]}...")
-        
-        if analysis.get("correlations"):
-            analysis_summary.append(f"[bold]Correlations Found:[/bold] {len(analysis['correlations'])}")
-        if analysis.get("uncertainties"):
-            analysis_summary.append(f"[bold]Uncertainties:[/bold] {len(analysis['uncertainties'])}")
-        if follow_up:
-            analysis_summary.append(f"[bold]Follow-up Queries:[/bold] {len(follow_up)}")
-            for q in follow_up[:3]:
-                analysis_summary.append(f"  • {q.get('tool')}: {q.get('reason', 'No reason provided')[:50]}")
-        
-        if analysis_summary:
-            logger.panel("\n".join(analysis_summary), title="🔍 Analysis Results", style="yellow")
-        
-        return {
-            "key_insights": state.get("key_insights", []) + analysis.get("key_insights", []),
-            "correlations": state.get("correlations", []) + analysis.get("correlations", []),
-            "uncertainties": state.get("uncertainties", []) + analysis.get("uncertainties", []),
-            "pending_queries": follow_up[:3],  # Limit follow-ups
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "reasoning_depth": state.get("reasoning_depth", 0) + 1,
-            "chain_of_thought": state.get("chain_of_thought", []) + ([thinking] if thinking else []),
-            "current_phase": next_phase,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-            "messages": state["messages"] + [
-                AIMessage(content=f"Analysis: {json.dumps(analysis, indent=2)}"),
-            ],
-        }
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse analysis: {e}")
-        return {
-            "current_phase": ResearchPhase.SYNTHESIZING.value,
-            "iteration": state["iteration"] + 1,
-        }
+    
+    # Add reasoning step
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="analyzing",
+        thought=thinking if thinking else "Analyzing patterns in collected evidence",
+        action=f"Identified {len(analysis.get('key_insights', []))} insights",
+        observation=f"Found {len(analysis.get('correlations', []))} correlations, {len(analysis.get('uncertainties', []))} uncertainties",
+        conclusion="Analysis complete, proceeding to reflection" if not follow_up else f"Need {len(follow_up)} more queries",
+        confidence=0.75,
+    )
+    
+    # Log analysis details
+    analysis_summary = []
+    if analysis.get("key_insights"):
+        analysis_summary.append("[bold]Key Insights:[/bold]")
+        for insight in analysis["key_insights"]:
+            if isinstance(insight, dict):
+                analysis_summary.append(f"  • {insight.get('description', str(insight))}")
+            else:
+                analysis_summary.append(f"  • {insight}")
+    
+    # Show hypothesis implications if present
+    if analysis.get("hypothesis_implications"):
+        analysis_summary.append(f"[bold]Hypothesis Implications:[/bold]")
+        for hi in analysis["hypothesis_implications"]:
+            emoji = {"supporting": "✅", "contradicting": "❌", "neutral": "➖"}.get(hi.get("evidence_type", "neutral"), "➖")
+            analysis_summary.append(f"  {emoji} [{hi.get('hypothesis_id')}] {hi.get('explanation', '')}")
+    
+    if analysis.get("correlations"):
+        analysis_summary.append(f"[bold]Correlations Found:[/bold] {len(analysis['correlations'])}")
+    if analysis.get("uncertainties"):
+        analysis_summary.append(f"[bold]Uncertainties:[/bold] {len(analysis['uncertainties'])}")
+    if follow_up:
+        analysis_summary.append(f"[bold]Follow-up Queries:[/bold] {len(follow_up)}")
+        for q in follow_up:
+            analysis_summary.append(f"  • {q.get('tool')}: {q.get('reason', 'No reason provided')}")
+    
+    if analysis_summary:
+        logger.panel("\n".join(analysis_summary), title="🔍 Analysis Results", style="yellow")
+    
+    return {
+        "key_insights": state.get("key_insights", []) + analysis.get("key_insights", []),
+        "correlations": state.get("correlations", []) + analysis.get("correlations", []),
+        "uncertainties": state.get("uncertainties", []) + analysis.get("uncertainties", []),
+        "pending_queries": follow_up[:3],  # Limit follow-ups
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "reasoning_depth": state.get("reasoning_depth", 0) + 1,
+        "chain_of_thought": state.get("chain_of_thought", []) + ([thinking] if thinking else []),
+        "current_phase": next_phase,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+        "messages": state["messages"] + [
+            AIMessage(content=f"Analysis: {json.dumps(analysis, indent=2)}"),
+        ],
+    }
 
 
 # =============================================================================
@@ -1518,66 +1602,70 @@ Respond as JSON:
         HumanMessage(content=correlation_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        corr_text = response.content
-        if "```json" in corr_text:
-            corr_text = corr_text.split("```json")[1].split("```")[0]
-        elif "```" in corr_text:
-            corr_text = corr_text.split("```")[1].split("```")[0]
-        
-        correlations = json.loads(corr_text.strip())
-        
-        logger.success(f"Found {len(correlations.get('correlations', []))} correlations")
-        
-        # Log LLM response to reasoning file
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(CorrelationOutput)
+        output: CorrelationOutput = await structured_llm.ainvoke(messages)
+        correlations = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        correlations, error = _extract_json_with_logging(
+            response.content,
             phase="correlating",
-            prompt_summary="Find correlations between multi-source intelligence",
-            response=json.dumps(correlations, indent=2),
+            context=f"Correlating {len(findings)} findings by type: {list(by_type.keys())}",
         )
-        
-        # Log correlation details
-        corr_summary = []
-        for corr in correlations.get("correlations", [])[:5]:
-            corr_type = corr.get("correlation_type", "unknown")
-            desc = corr.get("description", "No description")[:80]
-            confidence = corr.get("confidence", "unknown")
-            corr_summary.append(f"[bold]{corr_type}[/bold] ({confidence})")
-            corr_summary.append(f"  {desc}...")
-        
-        if correlations.get("synthesis_notes"):
-            corr_summary.append(f"\n[bold]Synthesis:[/bold] {correlations['synthesis_notes'][:150]}...")
-        
-        if corr_summary:
-            logger.panel("\n".join(corr_summary), title="🔗 Correlations Found", style="magenta")
-        
-        # Add reasoning step for correlation
-        reasoning_step = _add_reasoning_step(
-            state,
-            phase="correlating",
-            thought="Looking for connections across different data sources",
-            action=f"Found {len(correlations.get('correlations', []))} correlations",
-            observation=correlations.get("synthesis_notes", "No synthesis notes"),
-            conclusion="Ready for verification before final synthesis",
-            confidence=0.8,
-        )
-        
-        return {
-            "correlations": state.get("correlations", []) + correlations.get("correlations", []),
-            "key_insights": state.get("key_insights", []) + [correlations.get("synthesis_notes", "")],
-            "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
-            "reasoning_depth": state.get("reasoning_depth", 0) + 1,
-            "current_phase": ResearchPhase.VERIFYING.value,  # Go to verification before synthesis
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-    except json.JSONDecodeError:
-        return {
-            "current_phase": ResearchPhase.VERIFYING.value,  # Still verify even on error
-            "iteration": state["iteration"] + 1,
-        }
+        if error:
+            return {
+                "current_phase": ResearchPhase.VERIFYING.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+    
+    logger.success(f"Found {len(correlations.get('correlations', []))} correlations")
+    
+    # Log LLM response to reasoning file
+    writer.log_llm_response(
+        phase="correlating",
+        prompt_summary="Find correlations between multi-source intelligence",
+        response=json.dumps(correlations, indent=2),
+    )
+    
+    # Log correlation details
+    corr_summary = []
+    for corr in correlations.get("correlations", []):
+        corr_type = corr.get("correlation_type", "unknown")
+        desc = corr.get("description", "No description")
+        confidence = corr.get("confidence", "unknown")
+        corr_summary.append(f"[bold]{corr_type}[/bold] ({confidence})")
+        corr_summary.append(f"  {desc}")
+    
+    if correlations.get("synthesis_notes"):
+        corr_summary.append(f"\n[bold]Synthesis:[/bold] {correlations['synthesis_notes']}")
+    
+    if corr_summary:
+        logger.panel("\n".join(corr_summary), title="🔗 Correlations Found", style="magenta")
+    
+    # Add reasoning step for correlation
+    reasoning_step = _add_reasoning_step(
+        state,
+        phase="correlating",
+        thought="Looking for connections across different data sources",
+        action=f"Found {len(correlations.get('correlations', []))} correlations",
+        observation=correlations.get("synthesis_notes", "No synthesis notes"),
+        conclusion="Ready for verification before final synthesis",
+        confidence=0.8,
+    )
+    
+    return {
+        "correlations": state.get("correlations", []) + correlations.get("correlations", []),
+        "key_insights": state.get("key_insights", []) + [correlations.get("synthesis_notes", "")],
+        "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
+        "reasoning_depth": state.get("reasoning_depth", 0) + 1,
+        "current_phase": ResearchPhase.VERIFYING.value,  # Go to verification before synthesis
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================
@@ -1638,7 +1726,28 @@ async def synthesize_report(
     if state.get("reflection_notes"):
         critical_notes = [n for n in state["reflection_notes"] if n.get("severity") == "critical"]
         if critical_notes:
-            reflection_summary = "\n## Critical Reflection Notes\n" + "\n".join([f"- {n['content']}" for n in critical_notes[:3]])
+            reflection_summary = "\n## Critical Reflection Notes\n" + "\n".join([f"- {n['content']}" for n in critical_notes])
+    
+    # Prepare findings with source information for citation
+    findings_for_citation = []
+    for i, finding in enumerate(state.get("findings", [])):
+        findings_for_citation.append({
+            "finding_id": i + 1,
+            "source": finding.get("source"),
+            "source_type": finding.get("source_type"),
+            "timestamp": finding.get("timestamp"),
+            "content": finding.get("content"),
+            "location": finding.get("location"),
+        })
+    
+    # Prepare executed queries for reference
+    executed_queries_summary = []
+    for q in state.get("executed_queries", []):
+        executed_queries_summary.append({
+            "tool": q.get("tool"),
+            "args": q.get("args"),
+            "timestamp": q.get("timestamp"),
+        })
     
     synthesis_prompt = f"""
 {ENHANCED_SYNTHESIZER_PROMPT}
@@ -1665,14 +1774,19 @@ async def synthesize_report(
 - Reflection iterations: {state.get("reflection_iterations", 0)}
 - Verification results: {len(state.get("verification_results", []))} items verified
 
-## Data Sources Used
-- Queries executed: {len(state.get("executed_queries", []))}
-- Findings collected: {len(state.get("findings", []))}
+## Raw Findings (Sources for Citation)
+These are the actual data points collected from tools. CITE THESE in your report.
+{json.dumps(findings_for_citation, indent=2)}
 
-Create a comprehensive intelligence report as JSON:
+## Queries Executed
+{json.dumps(executed_queries_summary, indent=2)}
+
+Create a comprehensive intelligence report as JSON. 
+IMPORTANT: The detailed_report MUST include inline citations for every claim and a "## Sources" section at the end.
+
 {{
     "executive_summary": "2-3 sentence summary of key findings",
-    "detailed_report": "Multi-paragraph detailed analysis in markdown format",
+    "detailed_report": "Multi-paragraph detailed analysis in markdown format WITH INLINE CITATIONS and a ## Sources section at the end",
     "recommendations": ["recommendation 1", "recommendation 2"],
     "confidence_assessment": "Overall confidence level and explanation",
     "methodology_note": "Brief note on the multi-step reasoning process used"
@@ -1684,61 +1798,65 @@ Create a comprehensive intelligence report as JSON:
         HumanMessage(content=synthesis_prompt),
     ]
     
-    response = await llm.ainvoke(messages)
-    
+    # Use structured output for reliable JSON
     try:
-        report_text = response.content
-        if "```json" in report_text:
-            report_text = report_text.split("```json")[1].split("```")[0]
-        elif "```" in report_text:
-            report_text = report_text.split("```")[1].split("```")[0]
-        
-        report = json.loads(report_text.strip())
-        
-        logger.success("Final report synthesized")
-        
-        # Log LLM response to reasoning file
-        writer.log_llm_response(
+        structured_llm = llm.with_structured_output(SynthesisOutput)
+        output: SynthesisOutput = await structured_llm.ainvoke(messages)
+        report = output.model_dump()
+    except Exception as e:
+        logger.warning(f"⚠️ Structured output failed, falling back to JSON extraction: {e}")
+        response = await llm.ainvoke(messages)
+        report, error = _extract_json_with_logging(
+            response.content,
             phase="synthesizing",
-            prompt_summary="Synthesize final intelligence report",
-            response=json.dumps(report, indent=2),
+            context=f"Synthesizing report with {len(insights_to_use)} insights and {len(correlations_to_use)} correlations",
         )
-        
-        # Log the executive summary
-        if report.get("executive_summary"):
-            logger.panel(
-                report["executive_summary"],
-                title="📊 Executive Summary",
-                style="green"
-            )
-        
-        # Log recommendations
-        if report.get("recommendations"):
-            rec_lines = ["[bold]Recommendations:[/bold]"]
-            for rec in report["recommendations"][:5]:
-                rec_lines.append(f"  • {rec}")
-            logger.panel("\n".join(rec_lines), title="💡 Recommendations", style="cyan")
-        
-        # Log confidence assessment
-        if report.get("confidence_assessment"):
-            logger.thinking(f"Confidence: {report['confidence_assessment'][:150]}...")
-        
-        return {
-            "executive_summary": report.get("executive_summary"),
-            "detailed_report": report.get("detailed_report"),
-            "recommendations": report.get("recommendations", []),
-            "confidence_assessment": report.get("confidence_assessment"),
-            "current_phase": ResearchPhase.COMPLETE.value,
-            "iteration": state["iteration"] + 1,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-    except json.JSONDecodeError as e:
-        # Return raw content if JSON parsing fails
-        return {
-            "detailed_report": response.content,
-            "current_phase": ResearchPhase.COMPLETE.value,
-            "iteration": state["iteration"] + 1,
-        }
+        if error:
+            logger.warning(f"⚠️ JSON parsing failed, using raw response as report")
+            return {
+                "detailed_report": response.content,
+                "current_phase": ResearchPhase.COMPLETE.value,
+                "iteration": state["iteration"] + 1,
+                "error": error,
+            }
+    
+    logger.success("Final report synthesized")
+    
+    # Log LLM response to reasoning file
+    writer.log_llm_response(
+        phase="synthesizing",
+        prompt_summary="Synthesize final intelligence report",
+        response=json.dumps(report, indent=2),
+    )
+    
+    # Log the executive summary
+    if report.get("executive_summary"):
+        logger.panel(
+            report["executive_summary"],
+            title="📊 Executive Summary",
+            style="green"
+        )
+    
+    # Log recommendations
+    if report.get("recommendations"):
+        rec_lines = ["[bold]Recommendations:[/bold]"]
+        for rec in report["recommendations"]:
+            rec_lines.append(f"  • {rec}")
+        logger.panel("\n".join(rec_lines), title="💡 Recommendations", style="cyan")
+    
+    # Log confidence assessment
+    if report.get("confidence_assessment"):
+        logger.thinking(f"Confidence: {report['confidence_assessment']}")
+    
+    return {
+        "executive_summary": report.get("executive_summary"),
+        "detailed_report": report.get("detailed_report"),
+        "recommendations": report.get("recommendations", []),
+        "confidence_assessment": report.get("confidence_assessment"),
+        "current_phase": ResearchPhase.COMPLETE.value,
+        "iteration": state["iteration"] + 1,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 
 # =============================================================================

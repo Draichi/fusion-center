@@ -358,6 +358,7 @@ All reasoning steps are logged to `reasoning.log` including:
 - [ ] **Meduza/The Insider RSS** - Independent Russian news sources
 
 ### 🟡 Future
+- [ ] Two agents, one for reasoning and onde for strictly JSON output
 - [ ] Event correlation engine
 - [ ] Real-time alerting
 - [ ] Web dashboard
