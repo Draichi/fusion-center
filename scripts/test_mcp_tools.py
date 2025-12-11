@@ -112,6 +112,57 @@ async def test_gdelt_news() -> TestResult:
         )
 
 
+async def test_rss_feed() -> TestResult:
+    """Test RSS feed fetching tool."""
+    from src.mcp_server.tools.rss import fetch_rss_feed
+    
+    start = datetime.now()
+    try:
+        # Test with Meduza feed
+        result = await fetch_rss_feed(
+            source="meduza",
+            max_articles=10
+        )
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        
+        if result.get("status") == "error":
+            return TestResult(
+                tool_name="RSS Feed (fetch_rss_news)",
+                status=TestStatus.ERROR,
+                message=result.get("error_message", "Unknown error"),
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        article_count = result.get("article_count", 0)
+        if article_count == 0:
+            return TestResult(
+                tool_name="RSS Feed (fetch_rss_news)",
+                status=TestStatus.EMPTY,
+                message="No articles found (feed working but no results)",
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        source_name = result.get("source", "RSS")
+        return TestResult(
+            tool_name="RSS Feed (fetch_rss_news)",
+            status=TestStatus.SUCCESS,
+            message=f"Found {article_count} articles from {source_name}",
+            data_count=article_count,
+            response_time_ms=elapsed,
+            raw_response=result
+        )
+    except Exception as e:
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        return TestResult(
+            tool_name="RSS Feed (fetch_rss_news)",
+            status=TestStatus.ERROR,
+            message=f"Exception: {type(e).__name__}: {str(e)}",
+            response_time_ms=elapsed
+        )
+
+
 async def test_nasa_firms() -> TestResult:
     """Test NASA FIRMS thermal anomaly detection."""
     from src.mcp_server.tools.geo import check_nasa_firms
@@ -528,6 +579,7 @@ async def test_otx_threat_search() -> TestResult:
 
 TOOL_MAP = {
     "gdelt": test_gdelt_news,
+    "rss": test_rss_feed,
     "nasa": test_nasa_firms,
     "ioda": test_ioda_connectivity,
     "ioda_outages": test_ioda_outages,
@@ -705,6 +757,7 @@ def parse_args() -> argparse.Namespace:
         epilog="""
 Available tools:
   gdelt           - GDELT news search
+  rss             - RSS feed fetching (Meduza, The Insider, The Cradle)
   nasa            - NASA FIRMS thermal anomalies (requires API key)
   ioda            - IODA internet connectivity
   ioda_outages    - IODA detected outage events

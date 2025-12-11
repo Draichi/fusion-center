@@ -34,6 +34,7 @@ Project Overwatch is an autonomous intelligence system that combines a Model Con
 | Category | Tool | Description |
 |----------|------|-------------|
 | 📰 **News** | `search_news` | Search GDELT for global news |
+| 📰 **News** | `fetch_rss_news` | Fetch articles from RSS feeds (Meduza, The Insider, The Cradle) |
 | 🛰️ **Satellite** | `detect_thermal_anomalies` | NASA FIRMS fire/explosion detection |
 | 🌐 **Cyber** | `check_connectivity` | IODA internet outage detection |
 | 🌐 **Cyber** | `check_traffic_metrics` | Cloudflare Radar analysis |
@@ -225,6 +226,9 @@ async def run_analysis():
 | Source | Description | Auth |
 |--------|-------------|------|
 | [GDELT](https://www.gdeltproject.org/) | Global news monitoring | Free |
+| [Meduza](https://meduza.io/) | Independent Russian news | Free (RSS) |
+| [The Insider](https://theinsider.me/) | Russian investigative journalism | Free (RSS) |
+| [The Cradle](https://thecradle.co/) | Geopolitical news (West Asia) | Free (RSS) |
 | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Satellite fire detection | Free API key |
 | [IODA](https://ioda.inetintel.cc.gatech.edu/) | Internet outages | Free |
 | [Cloudflare Radar](https://radar.cloudflare.com/) | Traffic analytics | Free (limited) |
@@ -357,7 +361,7 @@ All reasoning steps are logged to `reasoning.log` including:
 ### 🔴 Priority: New Data Sources
 - [x] **Telegram Channels** - Real-time OSINT from conflict zones (Telethon API)
 - [x] **AlienVault OTX** - Open Threat Exchange for cyber threat intelligence
-- [ ] **Meduza/The Insider RSS** - Independent Russian news sources
+- [x] **RSS Feeds** - Independent news sources (Meduza, The Insider, The Cradle)
 
 ### 🟡 Future
 - [ ] Two agents, one for reasoning and onde for strictly JSON output

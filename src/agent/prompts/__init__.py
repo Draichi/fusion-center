@@ -64,9 +64,10 @@ Consider:
 - What time range is most relevant?
 - Which data sources are most likely to have relevant information?
 
-## CRITICAL: GDELT Query Syntax Rules
+## CRITICAL: News Search Tools
 
-When creating keywords for news searches (search_news tool), you MUST follow GDELT syntax:
+### GDELT (search_news tool)
+When creating keywords for news searches, you MUST follow GDELT syntax:
 
 1. **OR operators MUST be inside parentheses**: 
    - ✅ CORRECT: `(Odessa OR Odesa) AND missile`
@@ -84,6 +85,17 @@ When creating keywords for news searches (search_news tool), you MUST follow GDE
    - ✅ CORRECT: `Ukraine`, `Russia`, `China`, `Iran`, `Israel`, `US`, `UK`
    - ✅ Multi-word: `SouthKorea`, `NorthKorea`, `SaudiArabia`, `SouthAfrica`, `NewZealand`
    - ❌ WRONG: `UA`, `RU`, `CN` (ISO codes will not work)
+
+### RSS Feeds (fetch_rss_news tool)
+For independent news sources, use fetch_rss_news:
+- **meduza**: Independent Russian news (https://meduza.io)
+- **theinsider**: Russian investigative journalism (https://theinsider.me)
+- **thecradle**: Geopolitical news covering West Asia (https://thecradle.co)
+
+Use RSS feeds when you need:
+- Independent perspectives on Russian/Eastern European events
+- Investigative journalism from Russian sources
+- Geopolitical analysis of Middle East/West Asia
 
 Think step by step about how to approach this investigation systematically.
 """
@@ -230,6 +242,7 @@ Should we gather more data, or is it time to synthesize the final report?
 | Tool | Required Parameters |
 |------|---------------------|
 | `search_news` | `keywords` (REQUIRED) |
+| `fetch_rss_news` | `source` (REQUIRED) |
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) |
 | `check_connectivity` | `country_code` (REQUIRED) |
 | `check_traffic_metrics` | `country_code` (REQUIRED) |
@@ -244,8 +257,15 @@ Should we gather more data, or is it time to synthesize the final report?
 - ❌ WRONG: `"args": {{}}` (empty args will FAIL)
 - For source_country use names like: Ukraine, Russia, China, Iran (NOT ISO codes like UA, RU)
 
+### For fetch_rss_news:
+- Available sources: "meduza", "theinsider", "thecradle"
+- ✅ CORRECT: `"source": "meduza"` or `"source": "theinsider"` or `"source": "thecradle"`
+- ✅ OPTIONAL: `"max_articles": 20` (default: 20, max: 50)
+- ❌ WRONG: `"source": "meduza.io"` (use short name only)
+- ❌ WRONG: `"args": {{}}` (empty args will FAIL)
+
 If more data needed, specify queries as:
-{{"queries": [{{"tool": "search_news", "args": {{"keywords": "..."}}, "reason": "..."}}]}}
+{{"queries": [{{"tool": "search_news", "args": {{"keywords": "..."}}, "reason": "..."}}, {{"tool": "fetch_rss_news", "args": {{"source": "meduza"}}, "reason": "..."}}]}}
 
 If ready to synthesize:
 {{"ready_to_synthesize": true, "reason": "..."}}
@@ -343,6 +363,14 @@ When specifying `test_queries`, follow these rules:
 - **For source_country use country NAMES not ISO codes**:
   - ✅ `"source_country": "Ukraine"` or `"source_country": "Russia"`
   - ❌ `"source_country": "UA"` or `"source_country": "RU"` (WRONG)
+
+### For fetch_rss_news tool:
+- **Available sources**: "meduza", "theinsider", "thecradle"
+- ✅ `"source": "meduza"` (Meduza - independent Russian news)
+- ✅ `"source": "theinsider"` (The Insider - Russian investigative journalism)
+- ✅ `"source": "thecradle"` (The Cradle - geopolitical news covering West Asia)
+- ✅ OPTIONAL: `"max_articles": 20` (default: 20, range: 1-50)
+- ❌ `"source": "meduza.io"` (WRONG - use short name only)
 
 ### For detect_thermal_anomalies tool:
 - Just provide coordinates and radius, no keywords needed
@@ -462,6 +490,7 @@ Be harsh but fair. The goal is to improve the analysis, not to criticize.
 | Tool | Required Parameters | Example |
 |------|---------------------|---------|
 | `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
+| `fetch_rss_news` | `source` (REQUIRED) | `{{"source": "meduza", "max_articles": 20}}` |
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
 | `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
 | `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
@@ -472,6 +501,11 @@ Be harsh but fair. The goal is to improve the analysis, not to criticize.
 ### Syntax Rules for search_news:
 - OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
 - source_country uses country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
+- ❌ WRONG: `"args": {{}}` (empty args will FAIL)
+
+### Syntax Rules for fetch_rss_news:
+- Available sources: "meduza", "theinsider", "thecradle"
+- max_articles is optional (default: 20, range: 1-50)
 - ❌ WRONG: `"args": {{}}` (empty args will FAIL)
 
 Respond ONLY with JSON:
@@ -620,6 +654,7 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 | Tool | Required Parameters | Example |
 |------|---------------------|---------|
 | `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
+| `fetch_rss_news` | `source` (REQUIRED) | `{{"source": "meduza", "max_articles": 20}}` |
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
 | `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
 | `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
@@ -631,8 +666,13 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 - OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
 - source_country uses country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
 
+### Syntax Rules for fetch_rss_news:
+- Available sources: "meduza", "theinsider", "thecradle"
+- max_articles is optional (default: 20, range: 1-50)
+
 **INVALID (will fail):** `{{"tool": "search_news", "args": {{}}, "reason": "..."}}`
 **VALID:** `{{"tool": "search_news", "args": {{"keywords": "(Ukraine OR Donetsk) AND attack"}}, "reason": "..."}}`
+**VALID:** `{{"tool": "fetch_rss_news", "args": {{"source": "meduza"}}, "reason": "..."}}`
 
 Be analytical and systematic. Note uncertainties explicitly.
 """

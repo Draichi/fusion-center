@@ -1115,6 +1115,7 @@ async def gather_intelligence(
     # Define required parameters for each tool
     REQUIRED_PARAMS = {
         "search_news": ["keywords"],
+        "fetch_rss_news": ["source"],
         "detect_thermal_anomalies": ["latitude", "longitude"],
         "check_connectivity": ["country_code"],
         "check_traffic_metrics": ["country_code"],
@@ -1280,6 +1281,23 @@ def _extract_findings(
                 "confidence": "medium",
             })
     
+    elif tool_name == "fetch_rss_news":
+        articles = result.get("articles", [])
+        source_name = result.get("source", "RSS")
+        for article in articles:
+            findings.append({
+                "source": source_name,
+                "source_type": IntelligenceType.NEWS.value,
+                "timestamp": timestamp,
+                "content": {
+                    "title": article.get("title"),
+                    "url": article.get("link"),
+                    "date": article.get("published"),
+                    "description": article.get("description"),
+                },
+                "relevance_score": 0.8,
+                "confidence": "medium",
+            })
     
     elif tool_name == "detect_thermal_anomalies":
         anomalies = result.get("anomalies", [])

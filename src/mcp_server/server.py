@@ -25,6 +25,7 @@ from mcp.server.fastmcp import FastMCP
 from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_outages, get_ioda_outages
 from src.mcp_server.tools.geo import check_nasa_firms
 from src.mcp_server.tools.news import query_gdelt_events
+from src.mcp_server.tools.rss import fetch_rss_feed
 from src.mcp_server.tools.telegram import (
     search_telegram_channels,
     get_telegram_channel_info,
@@ -112,6 +113,59 @@ async def search_news(
         status=result.get("status", "unknown"),
         count=result.get("article_count", 0),
         details={"keywords": keywords, "timespan": timespan},
+    )
+
+    return result
+
+
+# =============================================================================
+# RSS Feed Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def fetch_rss_news(
+    source: str,
+    max_articles: int = 20,
+) -> dict[str, Any]:
+    """
+    Fetch latest articles from independent news RSS feeds.
+
+    Supported sources:
+    - meduza: Meduza (independent Russian news) - https://meduza.io/rss/all
+    - theinsider: The Insider (Russian investigative journalism) - https://theinsider.me/feed/
+    - thecradle: The Cradle (geopolitical news covering West Asia) - https://thecradle.co/feed
+
+    Use this tool to:
+    - Get latest breaking news from independent sources
+    - Monitor coverage of conflicts and geopolitical events
+    - Track investigative journalism from Russian independent media
+    - Follow developments in West Asia and Middle East
+
+    Args:
+        source: Source identifier. One of: "meduza", "theinsider", "thecradle"
+        max_articles: Maximum number of articles to return (1-50). Default: 20.
+
+    Returns:
+        Dictionary with articles containing titles, URLs, publication dates,
+        descriptions, and source information.
+    """
+    log_tool_call(
+        "fetch_rss_news",
+        source=source,
+        max_articles=max_articles,
+    )
+
+    result = await fetch_rss_feed(
+        source=source,
+        max_articles=max_articles,
+    )
+
+    logger.result_summary(
+        tool_name="fetch_rss_news",
+        status=result.get("status", "unknown"),
+        count=result.get("article_count", 0),
+        details={"source": source, "max_articles": max_articles},
     )
 
     return result
