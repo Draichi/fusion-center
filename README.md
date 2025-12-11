@@ -40,8 +40,9 @@ Project Overwatch is an autonomous intelligence system that combines a Model Con
 | 📱 **Telegram** | `search_telegram` | Search OSINT Telegram channels |
 | 📱 **Telegram** | `get_channel_info` | Get Telegram channel metadata |
 | 📱 **Telegram** | `list_osint_channels` | List curated OSINT channels |
-| 🚫 **Sanctions** | `search_sanctions` | Search sanctions lists (stub) |
-| 🚫 **Sanctions** | `screen_entity` | Entity compliance screening (stub) |
+| 🔍 **Threat Intel** | `check_ioc` | Look up IoC in AlienVault OTX |
+| 🔍 **Threat Intel** | `get_threat_pulse` | Get OTX pulse details |
+| 🔍 **Threat Intel** | `search_threats` | Search OTX threat pulses |
 
 ### AI Agent
 
@@ -84,6 +85,9 @@ NASA_FIRMS_API_KEY=your_key_here
 TELEGRAM_API_ID=your_api_id
 TELEGRAM_API_HASH=your_api_hash
 # After setting these, run: python scripts/telegram_auth.py
+
+# Required for threat intelligence (get from https://otx.alienvault.com)
+OTX_API_KEY=your_otx_key
 
 # For agent (choose based on provider)
 GOOGLE_API_KEY=your_google_key      # for gemini provider
@@ -158,7 +162,7 @@ fusion-center/
     │       ├── news.py         # GDELT
     │       ├── cyber.py        # IODA/Cloudflare
     │       ├── telegram.py     # Telegram OSINT channels
-    │       └── sanctions.py    # OpenSanctions (stub)
+    │       └── threat_intel.py # AlienVault OTX
     │
     ├── agent/                  # 🤖 AI Agent
     │   ├── __init__.py
@@ -225,7 +229,7 @@ async def run_analysis():
 | [IODA](https://ioda.inetintel.cc.gatech.edu/) | Internet outages | Free |
 | [Cloudflare Radar](https://radar.cloudflare.com/) | Traffic analytics | Free (limited) |
 | [Telegram](https://my.telegram.org/) | OSINT channel monitoring | Free API credentials |
-| [OpenSanctions](https://www.opensanctions.org/) | Sanctions database | Planned |
+| [AlienVault OTX](https://otx.alienvault.com/) | Threat intelligence | Free API key |
 
 ## 🧪 Development
 
@@ -352,9 +356,7 @@ All reasoning steps are logged to `reasoning.log` including:
 
 ### 🔴 Priority: New Data Sources
 - [x] **Telegram Channels** - Real-time OSINT from conflict zones (Telethon API)
-- [ ] **ACLED** - Armed Conflict Location & Event Data for structured conflict data
-- [ ] **AlienVault OTX** - Open Threat Exchange for cyber threat intelligence
-- [ ] **OpenSanctions** - Complete implementation (replace current stub)
+- [x] **AlienVault OTX** - Open Threat Exchange for cyber threat intelligence
 - [ ] **Meduza/The Insider RSS** - Independent Russian news sources
 
 ### 🟡 Future

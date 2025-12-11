@@ -25,11 +25,15 @@ from mcp.server.fastmcp import FastMCP
 from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_outages, get_ioda_outages
 from src.mcp_server.tools.geo import check_nasa_firms
 from src.mcp_server.tools.news import query_gdelt_events
-from src.mcp_server.tools.sanctions import check_entity_sanctions, get_sanctions_info
 from src.mcp_server.tools.telegram import (
     search_telegram_channels,
     get_telegram_channel_info,
     list_curated_channels,
+)
+from src.mcp_server.tools.threat_intel import (
+    lookup_indicator,
+    get_pulse_details,
+    search_pulses,
 )
 
 # Import shared modules
@@ -346,107 +350,161 @@ async def get_outages(
 
 
 # =============================================================================
-# Sanctions Screening Tools
+# Threat Intelligence Tools (AlienVault OTX)
 # =============================================================================
 
 
 @mcp.tool()
-async def search_sanctions(
-    query: str,
-    entity_type: str | None = None,
-    countries: list[str] | None = None,
-    limit: int = 20,
+async def check_ioc(
+    indicator: str,
+    indicator_type: str = "IPv4",
 ) -> dict[str, Any]:
     """
-    Search sanctions lists for matching entities.
+    Look up an indicator of compromise (IoC) in AlienVault OTX.
 
-    **⚠️ STUB IMPLEMENTATION:** Currently returns mock data.
-    Full OpenSanctions integration is planned for future releases.
+    Query the OTX threat intelligence database for information about:
+    - IP addresses (malicious servers, C2, scanners)
+    - Domains and hostnames (phishing, malware distribution)
+    - File hashes (malware samples)
+    - URLs (malicious links)
+    - CVEs (vulnerability identifiers)
 
-    Searches consolidated sanctions databases for:
-    - Sanctioned individuals (politicians, oligarchs, military)
-    - Sanctioned organizations (companies, military units)
-    - Sanctioned vessels and aircraft
-    - Associated aliases and identifiers
+    **Note:** Requires OTX_API_KEY environment variable to be set.
+    Get your free key at: https://otx.alienvault.com
 
     Args:
-        query: Name, alias, or identifier to search for.
-        entity_type: Filter by type: 'person', 'organization', 'vessel', 'aircraft'.
-        countries: Filter by associated countries (e.g., ["RU", "BY"]).
-        limit: Maximum results (1-100). Default: 20.
+        indicator: The indicator value to look up. Examples:
+                   - IP: "8.8.8.8"
+                   - Domain: "example.com"
+                   - MD5: "44d88612fea8a8f36de82e1278abb02f"
+                   - SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                   - CVE: "CVE-2021-44228"
+        indicator_type: Type of indicator:
+                        - "IPv4" or "IPv6": IP addresses
+                        - "domain" or "hostname": Domain names
+                        - "URL": Full URLs
+                        - "FileHash-MD5", "FileHash-SHA1", "FileHash-SHA256": File hashes
+                        - "CVE": CVE identifiers
+                        - "email": Email addresses
+                        Default: "IPv4"
 
     Returns:
-        Dictionary with matching sanctioned entities and their details.
+        Dictionary with threat intelligence including:
+        - Reputation score
+        - Number of threat pulses referencing this indicator
+        - Associated malware families
+        - Geolocation data (for IPs)
+        - Related threat reports
     """
     log_tool_call(
-        "search_sanctions",
-        query=query,
-        entity_type=entity_type,
-        countries=countries,
-        limit=limit,
+        "check_ioc",
+        indicator=indicator,
+        indicator_type=indicator_type,
     )
 
-    result = await get_sanctions_info(
-        query=query,
-        entity_type=entity_type,
-        countries=countries,
-        limit=limit,
+    result = await lookup_indicator(
+        indicator=indicator,
+        indicator_type=indicator_type,
     )
+
+    indicator_info = result.get("indicator_info", {})
 
     logger.result_summary(
-        tool_name="search_sanctions",
-        status="stub" if result.get("is_stub") else result.get("status", "unknown"),
-        count=result.get("match_count", 0),
-        details={"query": query, "is_stub": result.get("is_stub", True)},
+        tool_name="check_ioc",
+        status=result.get("status", "unknown"),
+        count=result.get("pulse_count", 0),
+        details={
+            "indicator": indicator,
+            "type": indicator_type,
+            "pulse_count": indicator_info.get("pulse_count", 0),
+        },
     )
 
     return result
 
 
 @mcp.tool()
-async def screen_entity(
-    name: str,
-    date_of_birth: str | None = None,
-    nationality: str | None = None,
+async def get_threat_pulse(
+    pulse_id: str,
 ) -> dict[str, Any]:
     """
-    Perform a compliance screening check on a specific entity.
+    Get detailed information about a specific OTX threat pulse.
 
-    **⚠️ STUB IMPLEMENTATION:** Currently returns mock data.
-
-    Quick compliance check useful for:
-    - Pre-transaction screening
-    - Due diligence on partners
-    - Counterparty verification
+    Pulses are community-contributed threat intelligence reports containing
+    collections of indicators related to specific threats, campaigns, or malware.
+    Use this to get full details about a pulse found via check_ioc or search_threats.
 
     Args:
-        name: Full name of the person or organization.
-        date_of_birth: Optional DOB (YYYY-MM-DD) for better matching.
-        nationality: Optional ISO country code for nationality.
+        pulse_id: The unique identifier of the pulse (from previous query results).
 
     Returns:
-        Dictionary with screening results and risk assessment.
+        Dictionary with full pulse details including:
+        - Description and author
+        - All indicators of compromise
+        - Targeted countries and malware families
+        - Reference URLs and tags
     """
-    log_tool_call(
-        "screen_entity",
-        name=name,
-        date_of_birth=date_of_birth,
-        nationality=nationality,
-    )
+    log_tool_call("get_threat_pulse", pulse_id=pulse_id)
 
-    result = await check_entity_sanctions(
-        name=name,
-        date_of_birth=date_of_birth,
-        nationality=nationality,
-    )
+    result = await get_pulse_details(pulse_id=pulse_id)
 
-    screening = result.get("screening_result", {})
+    pulse = result.get("pulse", {})
 
     logger.result_summary(
-        tool_name="screen_entity",
-        status="stub" if result.get("is_stub") else result.get("status", "unknown"),
-        count=screening.get("matches_found", 0),
-        details={"entity": name, "risk_level": screening.get("risk_level", "unknown")},
+        tool_name="get_threat_pulse",
+        status=result.get("status", "unknown"),
+        count=result.get("indicator_count", 0),
+        details={
+            "pulse_id": pulse_id,
+            "name": pulse.get("name", ""),
+        },
+    )
+
+    return result
+
+
+@mcp.tool()
+async def search_threats(
+    query: str,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """
+    Search for threat intelligence pulses in AlienVault OTX.
+
+    Search the OTX database for threat reports matching keywords.
+    Useful for researching:
+    - APT groups (e.g., "APT28", "Lazarus Group")
+    - Malware families (e.g., "Emotet", "Cobalt Strike")
+    - Campaigns (e.g., "Ukraine cyberattack", "ransomware")
+    - Vulnerabilities (e.g., "Log4j", "PrintNightmare")
+
+    Args:
+        query: Search terms (e.g., "APT28 Russia", "ransomware Ukraine").
+        limit: Maximum number of pulses to return (1-50). Default: 20.
+
+    Returns:
+        Dictionary with matching threat pulses including:
+        - Pulse names and descriptions
+        - Indicator counts
+        - Associated malware families and tags
+        - Targeted countries
+    """
+    log_tool_call(
+        "search_threats",
+        query=query,
+        limit=limit,
+    )
+
+    result = await search_pulses(
+        query=query,
+        limit=limit,
+    )
+
+    logger.result_summary(
+        tool_name="search_threats",
+        status=result.get("status", "unknown"),
+        count=result.get("pulse_count", 0),
+        details={"query": query},
     )
 
     return result
@@ -644,8 +702,9 @@ def main() -> None:
         ("search_telegram", "📱 Telegram", "Search OSINT Telegram channels"),
         ("get_channel_info", "📱 Telegram", "Get Telegram channel info"),
         ("list_osint_channels", "📱 Telegram", "List curated OSINT channels"),
-        ("search_sanctions", "🚫 Sanctions", "Search sanctions lists (stub)"),
-        ("screen_entity", "🚫 Sanctions", "Entity screening (stub)"),
+        ("check_ioc", "🔍 Threat Intel", "Look up IoC in AlienVault OTX"),
+        ("get_threat_pulse", "🔍 Threat Intel", "Get OTX pulse details"),
+        ("search_threats", "🔍 Threat Intel", "Search OTX threat pulses"),
     ]
     log_tools_table(tools_info)
 
@@ -658,6 +717,10 @@ def main() -> None:
         "TELEGRAM_API_ID/HASH": (
             settings.has_telegram_credentials,
             "Required for Telegram monitoring",
+        ),
+        "OTX_API_KEY": (
+            settings.has_otx_key,
+            "Required for AlienVault OTX threat intel",
         ),
         "LOG_LEVEL": (
             True,

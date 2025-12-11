@@ -509,8 +509,9 @@ Response:
                 "detect_thermal_anomalies": "NASA FIRMS Satellite Data",
                 "check_connectivity": "IODA Internet Monitoring",
                 "check_traffic_metrics": "Cloudflare Radar",
-                "search_sanctions": "OpenSanctions Database",
-                "screen_entity": "Sanctions Screening",
+                "check_ioc": "AlienVault OTX IoC Lookup",
+                "search_threats": "AlienVault OTX Threat Pulses",
+                "get_threat_pulse": "AlienVault OTX Pulse Details",
             }
             
             for tool, info in sources_summary.items():

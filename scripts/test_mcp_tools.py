@@ -421,65 +421,100 @@ def test_list_osint_channels() -> TestResult:
         )
 
 
-async def test_sanctions_search() -> TestResult:
-    """Test sanctions search (stub)."""
-    from src.mcp_server.tools.sanctions import get_sanctions_info
+async def test_otx_ioc_lookup() -> TestResult:
+    """Test AlienVault OTX IoC lookup."""
+    from src.mcp_server.tools.threat_intel import lookup_indicator
+    
+    # Check if API key is configured
+    if not settings.has_otx_key:
+        return TestResult(
+            tool_name="OTX IoC Lookup (check_ioc)",
+            status=TestStatus.SKIPPED,
+            message="OTX_API_KEY not configured"
+        )
     
     start = datetime.now()
     try:
-        result = await get_sanctions_info(
-            query="Example",
-            limit=5
+        # Test with Google's DNS (should be clean)
+        result = await lookup_indicator(
+            indicator="8.8.8.8",
+            indicator_type="IPv4"
         )
         elapsed = (datetime.now() - start).total_seconds() * 1000
         
-        is_stub = result.get("is_stub", True)
-        match_count = result.get("match_count", 0)
+        if result.get("status") == "error":
+            return TestResult(
+                tool_name="OTX IoC Lookup (check_ioc)",
+                status=TestStatus.ERROR,
+                message=result.get("error_message", "Unknown error"),
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        indicator_info = result.get("indicator_info", {})
+        pulse_count = indicator_info.get("pulse_count", 0)
         
         return TestResult(
-            tool_name="Sanctions Search (search_sanctions)",
-            status=TestStatus.STUB,
-            message=f"Stub: {match_count} mock matches",
-            data_count=match_count,
+            tool_name="OTX IoC Lookup (check_ioc)",
+            status=TestStatus.SUCCESS,
+            message=f"Found {pulse_count} pulses for indicator",
+            data_count=pulse_count,
             response_time_ms=elapsed,
             raw_response=result
         )
     except Exception as e:
         elapsed = (datetime.now() - start).total_seconds() * 1000
         return TestResult(
-            tool_name="Sanctions Search (search_sanctions)",
+            tool_name="OTX IoC Lookup (check_ioc)",
             status=TestStatus.ERROR,
             message=f"Exception: {type(e).__name__}: {str(e)}",
             response_time_ms=elapsed
         )
 
 
-async def test_entity_screening() -> TestResult:
-    """Test entity screening (stub)."""
-    from src.mcp_server.tools.sanctions import check_entity_sanctions
+async def test_otx_threat_search() -> TestResult:
+    """Test AlienVault OTX threat pulse search."""
+    from src.mcp_server.tools.threat_intel import search_pulses
+    
+    # Check if API key is configured
+    if not settings.has_otx_key:
+        return TestResult(
+            tool_name="OTX Threat Search (search_threats)",
+            status=TestStatus.SKIPPED,
+            message="OTX_API_KEY not configured"
+        )
     
     start = datetime.now()
     try:
-        result = await check_entity_sanctions(
-            name="John Smith",
-            nationality="US"
+        result = await search_pulses(
+            query="ransomware",
+            limit=5
         )
         elapsed = (datetime.now() - start).total_seconds() * 1000
         
-        is_stub = result.get("is_stub", True)
-        screening = result.get("screening_result", {})
+        if result.get("status") == "error":
+            return TestResult(
+                tool_name="OTX Threat Search (search_threats)",
+                status=TestStatus.ERROR,
+                message=result.get("error_message", "Unknown error"),
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        pulse_count = result.get("pulse_count", 0)
         
         return TestResult(
-            tool_name="Entity Screening (screen_entity)",
-            status=TestStatus.STUB,
-            message=f"Stub: risk_level={screening.get('risk_level', 'unknown')}",
+            tool_name="OTX Threat Search (search_threats)",
+            status=TestStatus.SUCCESS if pulse_count > 0 else TestStatus.EMPTY,
+            message=f"Found {pulse_count} threat pulses" if pulse_count > 0 else "No pulses found (API working)",
+            data_count=pulse_count,
             response_time_ms=elapsed,
             raw_response=result
         )
     except Exception as e:
         elapsed = (datetime.now() - start).total_seconds() * 1000
         return TestResult(
-            tool_name="Entity Screening (screen_entity)",
+            tool_name="OTX Threat Search (search_threats)",
             status=TestStatus.ERROR,
             message=f"Exception: {type(e).__name__}: {str(e)}",
             response_time_ms=elapsed
@@ -500,12 +535,12 @@ TOOL_MAP = {
     "telegram_search": test_telegram_search,
     "telegram_info": test_telegram_channel_info,
     "telegram_list": test_list_osint_channels,
-    "sanctions": test_sanctions_search,
-    "screening": test_entity_screening,
+    "otx_ioc": test_otx_ioc_lookup,
+    "otx_search": test_otx_threat_search,
 }
 
 # Tools that require API keys
-API_REQUIRED_TOOLS = {"nasa", "telegram_search", "telegram_info"}
+API_REQUIRED_TOOLS = {"nasa", "telegram_search", "telegram_info", "otx_ioc", "otx_search"}
 
 
 def print_config_status():
@@ -529,6 +564,14 @@ def print_config_status():
         "TELEGRAM_API_ID/HASH",
         telegram_status,
         "Required for Telegram monitoring"
+    )
+    
+    # AlienVault OTX
+    otx_status = "✅ Configured" if settings.has_otx_key else "❌ Not Set"
+    table.add_row(
+        "OTX_API_KEY",
+        otx_status,
+        "Required for AlienVault OTX threat intel"
     )
     
     # Cloudflare (optional)
@@ -664,12 +707,13 @@ Available tools:
   gdelt           - GDELT news search
   nasa            - NASA FIRMS thermal anomalies (requires API key)
   ioda            - IODA internet connectivity
+  ioda_outages    - IODA detected outage events
   cloudflare      - Cloudflare Radar traffic metrics
   telegram_search - Telegram channel search (requires API credentials)
   telegram_info   - Telegram channel info (requires API credentials)
   telegram_list   - List curated OSINT channels
-  sanctions       - Sanctions search (stub)
-  screening       - Entity screening (stub)
+  otx_ioc         - AlienVault OTX IoC lookup (requires API key)
+  otx_search      - AlienVault OTX threat pulse search (requires API key)
 
 Examples:
   # Test all tools
@@ -677,6 +721,9 @@ Examples:
 
   # Test specific tools
   uv run python scripts/test_mcp_tools.py --tools gdelt,ioda,cloudflare
+
+  # Test OTX tools
+  uv run python scripts/test_mcp_tools.py --tools otx_ioc,otx_search
 
   # Skip tools that require API keys
   uv run python scripts/test_mcp_tools.py --skip-api-required

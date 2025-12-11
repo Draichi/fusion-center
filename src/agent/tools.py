@@ -73,19 +73,26 @@ class CheckTrafficMetricsInput(BaseModel):
     metric: str = Field(default="traffic", description="Metric type: 'traffic', 'attacks', 'routing'")
 
 
-class SearchSanctionsInput(BaseModel):
-    """Input for searching sanctions."""
+class CheckIoCInput(BaseModel):
+    """Input for checking indicators of compromise."""
     
-    query: str = Field(description="Name, alias, or identifier to search")
-    entity_type: str | None = Field(
-        default=None,
-        description="Filter by type: 'person', 'organization', 'vessel', 'aircraft'"
+    indicator: str = Field(
+        description="The indicator value to look up (IP, domain, hash, URL, CVE, email)"
     )
-    countries: list[str] | None = Field(
-        default=None,
-        description="Filter by countries (e.g., ['RU', 'BY'])"
+    indicator_type: str = Field(
+        default="IPv4",
+        description="Type of indicator: 'IPv4', 'IPv6', 'domain', 'hostname', 'URL', "
+        "'FileHash-MD5', 'FileHash-SHA1', 'FileHash-SHA256', 'CVE', 'email'"
     )
-    limit: int = Field(default=20, description="Maximum results (1-100)")
+
+
+class SearchThreatsInput(BaseModel):
+    """Input for searching threat intelligence pulses."""
+    
+    query: str = Field(
+        description="Search terms (e.g., 'APT28 Russia', 'ransomware Ukraine')"
+    )
+    limit: int = Field(default=20, description="Maximum pulses to return (1-50)")
 
 
 class SearchTelegramInput(BaseModel):
@@ -120,8 +127,9 @@ VALID_TOOL_NAMES = {
     "detect_thermal_anomalies",
     "check_connectivity",
     "check_traffic_metrics",
-    "search_sanctions",
-    "screen_entity",
+    "check_ioc",
+    "get_threat_pulse",
+    "search_threats",
     "search_telegram",
     "get_channel_info",
     "list_osint_channels",
@@ -137,9 +145,12 @@ TOOL_NAME_ALIASES = {
     "NASA_FIRMS": "detect_thermal_anomalies",
     "firms": "detect_thermal_anomalies",
     "FIRMS": "detect_thermal_anomalies",
-    "sanctions": "search_sanctions",
-    "opensanctions": "search_sanctions",
-    "OpenSanctions": "search_sanctions",
+    "otx": "check_ioc",
+    "OTX": "check_ioc",
+    "alienvault": "check_ioc",
+    "AlienVault": "check_ioc",
+    "ioc": "check_ioc",
+    "threat_intel": "search_threats",
     "cloudflare": "check_traffic_metrics",
     "cloudflare_radar": "check_traffic_metrics",
     # Redirect removed tool to search_news
@@ -277,18 +288,25 @@ class MCPToolExecutor:
             "metric": metric,
         })
     
-    async def search_sanctions(
+    async def check_ioc(
+        self,
+        indicator: str,
+        indicator_type: str = "IPv4",
+    ) -> dict[str, Any]:
+        """Look up an indicator of compromise in AlienVault OTX."""
+        return await self.execute("check_ioc", {
+            "indicator": indicator,
+            "indicator_type": indicator_type,
+        })
+    
+    async def search_threats(
         self,
         query: str,
-        entity_type: str | None = None,
-        countries: list[str] | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search sanctions lists."""
-        return await self.execute("search_sanctions", {
+        """Search for threat intelligence pulses in AlienVault OTX."""
+        return await self.execute("search_threats", {
             "query": query,
-            "entity_type": entity_type,
-            "countries": countries,
             "limit": limit,
         })
     
@@ -365,11 +383,20 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "parameters": CheckTrafficMetricsInput.model_json_schema(),
         },
         {
-            "name": "search_sanctions",
-            "description": """Search sanctions lists for individuals, organizations, vessels, or aircraft.
-            NOTE: Currently returns mock data - real OpenSanctions integration pending.
-            Searches OFAC SDN, EU, UK, and UN sanctions lists.""",
-            "parameters": SearchSanctionsInput.model_json_schema(),
+            "name": "check_ioc",
+            "description": """Look up an indicator of compromise (IoC) in AlienVault OTX threat intelligence.
+            Query for: IP addresses (malicious servers, C2), domains (phishing, malware),
+            file hashes (malware samples), URLs (malicious links), CVEs (vulnerabilities).
+            Returns reputation score, threat pulse count, and associated malware families.""",
+            "parameters": CheckIoCInput.model_json_schema(),
+        },
+        {
+            "name": "search_threats",
+            "description": """Search AlienVault OTX for threat intelligence pulses.
+            Find threat reports about: APT groups (APT28, Lazarus), malware families (Emotet, Cobalt Strike),
+            campaigns (ransomware attacks), vulnerabilities (Log4j, PrintNightmare).
+            Returns pulse names, descriptions, indicator counts, and targeted countries.""",
+            "parameters": SearchThreatsInput.model_json_schema(),
         },
         {
             "name": "search_telegram",

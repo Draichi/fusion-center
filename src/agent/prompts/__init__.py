@@ -15,7 +15,7 @@ You have access to tools for:
 1. **News Intelligence (GDELT)** - Global news monitoring in 100+ languages
 2. **Satellite Monitoring (NASA FIRMS)** - Thermal anomaly detection (fires, explosions)
 3. **Infrastructure Monitoring (IODA)** - Internet outages and connectivity
-4. **Sanctions Screening** - Entity and organization screening
+4. **Threat Intelligence (AlienVault OTX)** - IoC lookup, threat pulse search, malware research
 
 ## CRITICAL: Data Integrity Rules
 
@@ -233,7 +233,8 @@ Should we gather more data, or is it time to synthesize the final report?
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) |
 | `check_connectivity` | `country_code` (REQUIRED) |
 | `check_traffic_metrics` | `country_code` (REQUIRED) |
-| `search_sanctions` | `query` (REQUIRED) |
+| `check_ioc` | `indicator` (REQUIRED) |
+| `search_threats` | `query` (REQUIRED) |
 | `search_telegram` | `keywords` (REQUIRED) |
 
 ### For search_news:
@@ -464,7 +465,8 @@ Be harsh but fair. The goal is to improve the analysis, not to criticize.
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
 | `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
 | `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `search_sanctions` | `query` (REQUIRED) | `{{"query": "entity name"}}` |
+| `check_ioc` | `indicator` (REQUIRED) | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
+| `search_threats` | `query` (REQUIRED) | `{{"query": "APT28 Russia"}}` |
 | `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
 
 ### Syntax Rules for search_news:
@@ -621,7 +623,8 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 | `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
 | `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
 | `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `search_sanctions` | `query` (REQUIRED) | `{{"query": "entity name"}}` |
+| `check_ioc` | `indicator` (REQUIRED) | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
+| `search_threats` | `query` (REQUIRED) | `{{"query": "APT28 Russia"}}` |
 | `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
 
 ### Syntax Rules for search_news:
@@ -652,7 +655,7 @@ When citing sources in the detailed_report:
 - For news articles: Include the source domain, title, and date. Example: "According to Reuters (2024-01-15), ..."
 - For satellite data: Include NASA FIRMS with coordinates and date. Example: "NASA FIRMS detected thermal anomalies at (48.46, 35.04) on 2024-01-15..."
 - For connectivity data: Include IODA with country/region. Example: "IODA reported connectivity disruptions in Ukraine on..."
-- For sanctions data: Include the sanctions database used. Example: "OFAC sanctions list indicates..."
+- For threat intelligence: Include AlienVault OTX with indicator/pulse. Example: "AlienVault OTX identified IP 1.2.3.4 in 5 threat pulses related to..."
 
 Use inline citations throughout the report. At the end of the detailed_report, include a "## Sources" section listing all sources used.
 

@@ -1118,9 +1118,10 @@ async def gather_intelligence(
         "detect_thermal_anomalies": ["latitude", "longitude"],
         "check_connectivity": ["country_code"],
         "check_traffic_metrics": ["country_code"],
-        "search_sanctions": ["query"],
+        "check_ioc": ["indicator"],
+        "search_threats": ["query"],
+        "get_threat_pulse": ["pulse_id"],
         "search_telegram": ["keywords"],
-        "screen_entity": ["name"],
     }
     
     for query in queries_to_run:
@@ -1231,12 +1232,23 @@ def _log_tool_result_summary(tool_name: str, result: dict[str, Any]) -> None:
         if outages:
             summary_lines.append(f"  • Recent outages: {len(outages)}")
     
-    elif tool_name in ["search_sanctions", "screen_entity"]:
-        entities = result.get("entities", [])
-        if entities:
-            summary_lines.append(f"[bold]Found {len(entities)} sanctioned entities[/bold]")
-            for e in entities:
-                summary_lines.append(f"  • {e.get('name')} ({e.get('entity_type')})")
+    elif tool_name == "check_ioc":
+        indicator_info = result.get("indicator_info", {})
+        pulse_count = indicator_info.get("pulse_count", 0)
+        if pulse_count > 0:
+            summary_lines.append(f"[bold]Found {pulse_count} threat pulses for indicator[/bold]")
+            malware = indicator_info.get("malware_families", [])
+            if malware:
+                summary_lines.append(f"  • Malware families: {', '.join(malware[:5])}")
+        else:
+            summary_lines.append("[bold]Indicator not found in threat database (clean)[/bold]")
+    
+    elif tool_name == "search_threats":
+        pulses = result.get("pulses", [])
+        if pulses:
+            summary_lines.append(f"[bold]Found {len(pulses)} threat pulses[/bold]")
+            for p in pulses[:5]:
+                summary_lines.append(f"  • {p.get('name', 'Unknown')}")
     
     if summary_lines:
         logger.panel("\n".join(summary_lines), title=f"📥 {tool_name} Results", style="dim cyan")
@@ -1323,21 +1335,63 @@ def _extract_findings(
                 "confidence": "high",
             })
     
-    elif tool_name == "search_sanctions":
-        entities = result.get("entities", [])
-        for entity in entities:
+    elif tool_name == "check_ioc":
+        indicator_info = result.get("indicator_info", {})
+        pulses = result.get("pulses", [])
+        
+        # Add indicator info as finding
+        if indicator_info.get("pulse_count", 0) > 0:
             findings.append({
-                "source": "OpenSanctions",
-                "source_type": IntelligenceType.SANCTIONS.value,
+                "source": "AlienVault OTX",
+                "source_type": IntelligenceType.THREAT_INTEL.value,
                 "timestamp": timestamp,
                 "content": {
-                    "name": entity.get("name"),
-                    "entity_type": entity.get("entity_type"),
-                    "countries": entity.get("countries"),
-                    "sanctions_lists": entity.get("sanctions_lists"),
+                    "indicator": indicator_info.get("indicator"),
+                    "indicator_type": indicator_info.get("indicator_type"),
+                    "pulse_count": indicator_info.get("pulse_count"),
+                    "malware_families": indicator_info.get("malware_families", []),
+                    "country": indicator_info.get("country"),
                 },
-                "relevance_score": entity.get("match_score", 0.8),
-                "confidence": "high" if entity.get("match_score", 0) > 0.9 else "medium",
+                "relevance_score": min(1.0, 0.5 + (indicator_info.get("pulse_count", 0) * 0.1)),
+                "confidence": "high" if indicator_info.get("pulse_count", 0) > 5 else "medium",
+            })
+        
+        # Add pulse references
+        for pulse in pulses[:5]:
+            findings.append({
+                "source": "AlienVault OTX",
+                "source_type": IntelligenceType.THREAT_INTEL.value,
+                "timestamp": timestamp,
+                "content": {
+                    "pulse_name": pulse.get("name"),
+                    "pulse_id": pulse.get("pulse_id"),
+                    "description": pulse.get("description", "")[:200],
+                    "tags": pulse.get("tags", []),
+                    "malware_families": pulse.get("malware_families", []),
+                },
+                "relevance_score": 0.85,
+                "confidence": "medium",
+            })
+    
+    elif tool_name == "search_threats":
+        pulses = result.get("pulses", [])
+        for pulse in pulses:
+            findings.append({
+                "source": "AlienVault OTX",
+                "source_type": IntelligenceType.THREAT_INTEL.value,
+                "timestamp": timestamp,
+                "content": {
+                    "pulse_name": pulse.get("name"),
+                    "pulse_id": pulse.get("pulse_id"),
+                    "description": pulse.get("description", "")[:300],
+                    "author": pulse.get("author_name"),
+                    "indicator_count": pulse.get("indicator_count", 0),
+                    "tags": pulse.get("tags", []),
+                    "targeted_countries": pulse.get("targeted_countries", []),
+                    "malware_families": pulse.get("malware_families", []),
+                },
+                "relevance_score": 0.8,
+                "confidence": "medium",
             })
     
     return findings

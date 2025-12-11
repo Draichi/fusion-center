@@ -288,7 +288,7 @@ def _extract_findings(tool_name, args, result):
                     "lon": anomaly.get("longitude"),
                 },
             })
-    # ... similar for cyber, sanctions
+    # ... similar for cyber, threat_intel
 ```
 
 ### Hypothesis Update (Post-Gathering)

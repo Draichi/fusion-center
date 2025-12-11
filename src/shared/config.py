@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Telegram API credentials (obtain from https://my.telegram.org)
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
+    
+    # AlienVault OTX API key (obtain from https://otx.alienvault.com)
+    otx_api_key: str | None = None
 
     # External API URLs
     gdelt_api_base_url: str = "https://api.gdeltproject.org/api/v2"
@@ -90,6 +93,11 @@ class Settings(BaseSettings):
     def has_telegram_credentials(self) -> bool:
         """Check if Telegram API credentials are configured."""
         return bool(self.telegram_api_id and self.telegram_api_hash)
+
+    @property
+    def has_otx_key(self) -> bool:
+        """Check if AlienVault OTX API key is configured."""
+        return bool(self.otx_api_key)
 
     @property
     def has_google_key(self) -> bool:

@@ -47,7 +47,7 @@ class IntelligenceType(str, Enum):
     NEWS = "news"
     SATELLITE = "satellite"
     CYBER = "cyber"
-    SANCTIONS = "sanctions"
+    THREAT_INTEL = "threat_intel"
     COMBINED = "combined"
 
 
