@@ -76,8 +76,8 @@ Examples:
     parser.add_argument(
         "--max-iter",
         type=int,
-        default=10,
-        help="Maximum research iterations (default: 10)",
+        default=settings.agent_max_iterations,
+        help=f"Maximum research iterations (default: {settings.agent_max_iterations})",
     )
     parser.add_argument(
         "--json",

@@ -14,6 +14,7 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 
 from src.agent.state import AgentState, ResearchPhase, create_initial_state
+from src.shared.config import settings
 from src.agent.nodes import (
     # Traditional nodes
     plan_research,
@@ -313,7 +314,7 @@ class DeepResearchAgent:
         provider: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
-        max_iterations: int = 10,
+        max_iterations: int | None = None,
         use_checkpointer: bool = True,
     ):
         """
@@ -331,7 +332,7 @@ class DeepResearchAgent:
         self.provider = provider or settings.agent_provider
         self.model = model
         self.temperature = temperature
-        self.max_iterations = max_iterations
+        self.max_iterations = max_iterations if max_iterations is not None else settings.agent_max_iterations
         
         # Initialize LLM
         self.llm = get_llm(

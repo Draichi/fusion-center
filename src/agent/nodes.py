@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from src.agent.state import AgentState, IntelligenceType, ResearchPhase, HypothesisStatus
+from src.shared.config import settings
 from src.agent.tools import MCPToolExecutor, get_tool_definitions, TOOL_NAME_ALIASES, VALID_TOOL_NAMES
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -467,10 +468,13 @@ Generate hypotheses that can be tested with these tools.
     
     logger.panel("\n".join(summary_lines), title="🔬 Research Hypotheses", style="cyan")
     
+    # Use test queries if available, otherwise keep existing pending_queries from research plan
+    queries_to_use = test_queries[:5] if test_queries else state.get("pending_queries", [])
+    
     return {
         "hypotheses": state.get("hypotheses", []) + hypotheses,
         "active_hypothesis_id": hypotheses[0]["id"] if hypotheses else None,
-        "pending_queries": test_queries[:5],  # Start with first 5 test queries
+        "pending_queries": queries_to_use,
         "reasoning_trace": state.get("reasoning_trace", []) + [reasoning_step],
         "reasoning_depth": state.get("reasoning_depth", 0) + 1,
         "chain_of_thought": state.get("chain_of_thought", []) + reasoning_chain,
@@ -1108,12 +1112,36 @@ async def gather_intelligence(
     queries_to_run = pending[:5]
     remaining = pending[5:]
     
+    # Define required parameters for each tool
+    REQUIRED_PARAMS = {
+        "search_news": ["keywords"],
+        "detect_thermal_anomalies": ["latitude", "longitude"],
+        "check_connectivity": ["country_code"],
+        "check_traffic_metrics": ["country_code"],
+        "search_sanctions": ["query"],
+        "search_telegram": ["keywords"],
+        "screen_entity": ["name"],
+    }
+    
     for query in queries_to_run:
         tool_name = query.get("tool")
         args = query.get("args", {})
         
         # Resolve tool name to handle aliases (e.g., search_news_by_location -> search_news)
         resolved_tool_name = _resolve_tool_name(tool_name)
+        
+        # Validate required parameters before execution
+        required = REQUIRED_PARAMS.get(resolved_tool_name, [])
+        missing = [p for p in required if p not in args or not args[p]]
+        if missing:
+            logger.warning(f"Skipping {tool_name}: missing required parameters {missing}")
+            writer.log_tool_execution(
+                tool_name=tool_name,
+                args=args,
+                result_summary=f"Skipped: Missing required parameters: {missing}",
+                success=False,
+            )
+            continue
         
         logger.info(f"Executing query: [bold]{tool_name}[/bold]")
         
@@ -1875,7 +1903,7 @@ def route_next_step(state: AgentState) -> Literal[
     """
     phase = state.get("current_phase", ResearchPhase.PLANNING.value)
     iteration = state.get("iteration", 0)
-    max_iter = state.get("max_iterations", 10)
+    max_iter = state.get("max_iterations", settings.agent_max_iterations)
     
     # Safety check for max iterations
     if iteration >= max_iter:

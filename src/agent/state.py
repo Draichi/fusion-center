@@ -13,6 +13,8 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
+from src.shared.config import settings
+
 
 class ResearchPhase(str, Enum):
     """Current phase of the research process."""
@@ -312,7 +314,7 @@ class AgentState(TypedDict):
 def create_initial_state(
     task: str,
     context: dict[str, Any] | None = None,
-    max_iterations: int = 10,
+    max_iterations: int | None = None,
 ) -> AgentState:
     """Create initial state for a new research task."""
     now = datetime.utcnow().isoformat()
@@ -329,7 +331,7 @@ def create_initial_state(
         research_plan=None,
         current_phase=ResearchPhase.PLANNING.value,
         iteration=0,
-        max_iterations=max_iterations,
+        max_iterations=max_iterations if max_iterations is not None else settings.agent_max_iterations,
         
         # Task Decomposition (Multi-step Reasoning)
         sub_tasks=[],

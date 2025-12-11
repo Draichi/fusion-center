@@ -223,18 +223,28 @@ Queries executed: {num_queries}
 
 Should we gather more data, or is it time to synthesize the final report?
 
-## IMPORTANT: Query Syntax Rules
+## CRITICAL: Required Parameters for Queries
 
-When specifying queries, follow these rules:
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+
+| Tool | Required Parameters |
+|------|---------------------|
+| `search_news` | `keywords` (REQUIRED) |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) |
+| `check_connectivity` | `country_code` (REQUIRED) |
+| `check_traffic_metrics` | `country_code` (REQUIRED) |
+| `search_sanctions` | `query` (REQUIRED) |
+| `search_telegram` | `keywords` (REQUIRED) |
 
 ### For search_news:
 - OR operators MUST be inside parentheses
 - ✅ CORRECT: `"keywords": "(term1 OR term2) AND term3"`
 - ❌ WRONG: `"keywords": "term1 OR term2 AND term3"`
+- ❌ WRONG: `"args": {{}}` (empty args will FAIL)
 - For source_country use names like: Ukraine, Russia, China, Iran (NOT ISO codes like UA, RU)
 
 If more data needed, specify queries as:
-{{"queries": [{{"tool": "...", "args": {{...}}, "reason": "..."}}]}}
+{{"queries": [{{"tool": "search_news", "args": {{"keywords": "..."}}, "reason": "..."}}]}}
 
 If ready to synthesize:
 {{"ready_to_synthesize": true, "reason": "..."}}
@@ -444,11 +454,23 @@ Critically examine the analysis so far and identify:
 
 Be harsh but fair. The goal is to improve the analysis, not to criticize.
 
-## Query Syntax Rules for investigation_suggestions
+## CRITICAL: Required Parameters for investigation_suggestions
 
-When suggesting follow-up queries:
-- **search_news**: OR operators MUST be in parentheses → `"(term1 OR term2) AND term3"`
-- **source_country**: Use country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+
+| Tool | Required Parameters | Example |
+|------|---------------------|---------|
+| `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
+| `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
+| `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
+| `search_sanctions` | `query` (REQUIRED) | `{{"query": "entity name"}}` |
+| `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
+
+### Syntax Rules for search_news:
+- OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
+- source_country uses country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
+- ❌ WRONG: `"args": {{}}` (empty args will FAIL)
 
 Respond ONLY with JSON:
 {{
@@ -589,11 +611,25 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 4. Confidence levels with justification
 5. What additional information would help
 
-## Query Syntax for Follow-up Queries
+## CRITICAL: Required Parameters for Follow-up Queries
 
-If suggesting follow-up queries:
-- **search_news**: OR operators MUST be in parentheses → `"(term1 OR term2) AND term3"`
-- **source_country**: Use country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+
+| Tool | Required Parameters | Example |
+|------|---------------------|---------|
+| `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
+| `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
+| `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
+| `search_sanctions` | `query` (REQUIRED) | `{{"query": "entity name"}}` |
+| `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
+
+### Syntax Rules for search_news:
+- OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
+- source_country uses country NAMES (Ukraine, Russia) NOT ISO codes (UA, RU)
+
+**INVALID (will fail):** `{{"tool": "search_news", "args": {{}}, "reason": "..."}}`
+**VALID:** `{{"tool": "search_news", "args": {{"keywords": "(Ukraine OR Donetsk) AND attack"}}, "reason": "..."}}`
 
 Be analytical and systematic. Note uncertainties explicitly.
 """
