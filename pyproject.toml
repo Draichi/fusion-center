@@ -18,6 +18,8 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "rich>=13.0.0",
     "telethon>=1.36.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +39,7 @@ agent = [
 [project.scripts]
 overwatch-server = "src.mcp_server.server:main"
 overwatch-agent = "src.agent.__main__:main"
+overwatch-dashboard = "src.dashboard.server:main"
 
 [build-system]
 requires = ["hatchling"]

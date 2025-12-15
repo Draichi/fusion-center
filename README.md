@@ -125,15 +125,39 @@ python -m src.agent --server http://localhost:9000/sse "Check internet status in
 python -m src.agent --json "Search for news about protests in China"
 ```
 
-### Run Both Together
+### Run the Dashboard
+
+```bash
+# Start dashboard (requires MCP server to be running)
+python -m src.dashboard.server
+
+# Custom port
+python -m src.dashboard.server --port 9000
+
+# Custom MCP server URL
+python -m src.dashboard.server --mcp-url http://localhost:9000/sse
+```
+
+The dashboard provides a web interface at `http://127.0.0.1:8000` showing:
+- Latest news from GDELT
+- Thermal anomalies on an interactive 3D globe
+- Telegram OSINT channel posts
+- Threat intelligence pulses
+
+### Run All Components Together
 
 ```bash
 # Terminal 1: Start MCP Server
 python -m src.mcp_server.server --transport sse --port 8080
 
-# Terminal 2: Run Agent
+# Terminal 2: Run Agent (optional)
 python -m src.agent "Correlate thermal anomalies with news near Kyiv"
+
+# Terminal 3: Start Dashboard (optional)
+python -m src.dashboard.server --port 8000
 ```
+
+You can run the MCP server alone and connect multiple clients (agent, dashboard, or custom clients) to it.
 
 ## 📁 Project Structure
 
@@ -174,6 +198,15 @@ fusion-center/
     │   ├── state.py            # Agent state schema
     │   ├── tools.py            # MCP tool executor
     │   └── prompts/            # System prompts & reasoning prompts
+    │
+    ├── dashboard/              # 🌐 Web Dashboard
+    │   ├── __init__.py
+    │   ├── server.py           # Dashboard server (FastAPI)
+    │   ├── api.py              # API endpoints (MCP client)
+    │   └── static/             # Frontend files
+    │       ├── index.html      # Dashboard page
+    │       ├── style.css       # Terminal DOS styling
+    │       └── app.js          # Frontend logic
     │
     └── shared/                 # 🔗 Shared Code
         ├── __init__.py
@@ -367,7 +400,7 @@ All reasoning steps are logged to `reasoning.log` including:
 - [ ] Two agents, one for reasoning and onde for strictly JSON output
 - [ ] Event correlation engine
 - [ ] Real-time alerting
-- [ ] Web dashboard
+- [x] Web dashboard
 
 ## 📄 License
 

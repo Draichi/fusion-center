@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     mcp_server_name: str = "project-overwatch"
     mcp_server_host: str = "127.0.0.1"
     mcp_server_port: int = 8080
+    
+    # Dashboard Configuration
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8000
 
     # ==========================================================================
     # Data Source API Keys
