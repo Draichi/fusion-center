@@ -116,6 +116,44 @@ class SearchTelegramInput(BaseModel):
     max_messages: int = Field(default=50, description="Max messages per channel (1-100)")
 
 
+class FetchRssNewsInput(BaseModel):
+    """Input for fetching RSS news."""
+    
+    source: str = Field(
+        description="RSS source identifier. Options: 'meduza', 'theinsider', 'thecradle'"
+    )
+    max_articles: int = Field(default=20, description="Maximum articles to return (1-50)")
+
+
+class GetOutagesInput(BaseModel):
+    """Input for getting IODA outage events."""
+    
+    entity_type: str = Field(
+        default="country",
+        description="Type of entity: 'country', 'region', or 'asn'"
+    )
+    entity_code: str | None = Field(
+        default=None,
+        description="Entity code (e.g., 'UA' for Ukraine). Leave empty for all entities."
+    )
+    days_back: int = Field(default=7, description="Days to look back (1-90)")
+    limit: int = Field(default=50, description="Maximum events to return (1-100)")
+
+
+class GetThreatPulseInput(BaseModel):
+    """Input for getting threat pulse details."""
+    
+    pulse_id: str = Field(description="The unique identifier of the pulse")
+
+
+class GetChannelInfoInput(BaseModel):
+    """Input for getting Telegram channel info."""
+    
+    channel_username: str = Field(
+        description="The channel username (with or without @). Example: 'ukrainenowenglish'"
+    )
+
+
 # =============================================================================
 # MCP Tool Executor
 # =============================================================================
@@ -124,8 +162,10 @@ class SearchTelegramInput(BaseModel):
 # Valid tool names that exist in the MCP server
 VALID_TOOL_NAMES = {
     "search_news",
+    "fetch_rss_news",
     "detect_thermal_anomalies",
     "check_connectivity",
+    "get_outages",
     "check_traffic_metrics",
     "check_ioc",
     "get_threat_pulse",
@@ -326,6 +366,54 @@ class MCPToolExecutor:
             "hours_back": hours_back,
             "max_messages": max_messages,
         })
+    
+    async def fetch_rss_news(
+        self,
+        source: str,
+        max_articles: int = 20,
+    ) -> dict[str, Any]:
+        """Fetch latest articles from RSS feeds."""
+        return await self.execute("fetch_rss_news", {
+            "source": source,
+            "max_articles": max_articles,
+        })
+    
+    async def get_outages(
+        self,
+        entity_type: str = "country",
+        entity_code: str | None = None,
+        days_back: int = 7,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Get detected internet outage events from IODA."""
+        return await self.execute("get_outages", {
+            "entity_type": entity_type,
+            "entity_code": entity_code,
+            "days_back": days_back,
+            "limit": limit,
+        })
+    
+    async def get_threat_pulse(
+        self,
+        pulse_id: str,
+    ) -> dict[str, Any]:
+        """Get detailed information about a specific OTX threat pulse."""
+        return await self.execute("get_threat_pulse", {
+            "pulse_id": pulse_id,
+        })
+    
+    async def get_channel_info(
+        self,
+        channel_username: str,
+    ) -> dict[str, Any]:
+        """Get information about a specific Telegram channel."""
+        return await self.execute("get_channel_info", {
+            "channel_username": channel_username,
+        })
+    
+    async def list_osint_channels(self) -> dict[str, Any]:
+        """List all curated OSINT Telegram channels."""
+        return await self.execute("list_osint_channels", {})
 
 
 # =============================================================================
@@ -355,14 +443,18 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             
             For source_country, use GDELT country names:
             Ukraine, Russia, China, Iran, Israel, US, UK, Germany, France,
-            SouthKorea, NorthKorea, SaudiArabia, SouthAfrica, NewZealand, etc.""",
+            SouthKorea, NorthKorea, SaudiArabia, SouthAfrica, NewZealand, etc.
+            
+            TIME RANGE: timespan parameter format: "7d" (days), "24h" (hours), "30m" (minutes). Default: "7d".""",
             "parameters": SearchNewsInput.model_json_schema(),
         },
         {
             "name": "detect_thermal_anomalies",
             "description": """Detect fires, explosions, and heat signatures using NASA FIRMS satellite data.
             Thermal anomalies can indicate: active fires, industrial explosions, military strikes,
-            or large-scale burning events. Includes automatic retry on timeout.""",
+            or large-scale burning events. Includes automatic retry on timeout.
+            
+            TIME LIMIT: day_range parameter must be between 1-10 days (default: 7 days).""",
             "parameters": DetectThermalAnomaliesInput.model_json_schema(),
         },
         {
@@ -373,7 +465,9 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             - Use country_code='RU' for Russia (not 'Moscow')
             
             Detects: government-imposed shutdowns, infrastructure damage from conflicts,
-            cyber attacks on networks, cable cuts, or routing anomalies.""",
+            cyber attacks on networks, cable cuts, or routing anomalies.
+            
+            TIME LIMIT: hours_back parameter must be between 1-168 hours (7 days, default: 24 hours).""",
             "parameters": CheckConnectivityInput.model_json_schema(),
         },
         {
@@ -406,7 +500,52 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             - OSINT analysis: Rybar, Bellingcat
             
             Use this for real-time information from conflict zones that may not yet be in mainstream media.
-            Messages include text, timestamps, view counts, and direct links.""",
+            Messages include text, timestamps, view counts, and direct links.
+            
+            TIME LIMIT: hours_back parameter must be between 1-168 hours (7 days, default: 24 hours).""",
             "parameters": SearchTelegramInput.model_json_schema(),
+        },
+        {
+            "name": "fetch_rss_news",
+            "description": """Fetch latest articles from independent news RSS feeds.
+            Supported sources:
+            - meduza: Meduza (independent Russian news)
+            - theinsider: The Insider (Russian investigative journalism)
+            - thecradle: The Cradle (geopolitical news covering West Asia)
+            
+            Use this to get latest breaking news from independent sources before they appear in GDELT.""",
+            "parameters": FetchRssNewsInput.model_json_schema(),
+        },
+        {
+            "name": "get_outages",
+            "description": """Get detected internet outage events from IODA.
+            Unlike check_connectivity which shows current status, this returns a list of detected
+            outage events with severity scores. Useful for tracking historical outages and patterns.
+            
+            IODA uses multiple detection methods: BGP analysis, active probing, network telescope, Google Transparency Report.
+            
+            TIME LIMIT: days_back parameter must be between 1-90 days (default: 7 days).""",
+            "parameters": GetOutagesInput.model_json_schema(),
+        },
+        {
+            "name": "get_threat_pulse",
+            "description": """Get detailed information about a specific OTX threat pulse.
+            Use this after finding a pulse via check_ioc or search_threats to get full details
+            including all indicators, targeted countries, malware families, and reference URLs.""",
+            "parameters": GetThreatPulseInput.model_json_schema(),
+        },
+        {
+            "name": "get_channel_info",
+            "description": """Get information about a specific Telegram channel.
+            Retrieves metadata including channel name, description, subscriber count, and verification status.
+            Useful for verifying channel authenticity before using in search_telegram.""",
+            "parameters": GetChannelInfoInput.model_json_schema(),
+        },
+        {
+            "name": "list_osint_channels",
+            "description": """List all curated OSINT Telegram channels.
+            Returns a categorized list of public Telegram channels monitored for OSINT purposes,
+            covering various perspectives on geopolitical events. No parameters required.""",
+            "parameters": {},
         },
     ]

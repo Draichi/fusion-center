@@ -17,6 +17,18 @@ You have access to tools for:
 3. **Infrastructure Monitoring (IODA)** - Internet outages and connectivity
 4. **Threat Intelligence (AlienVault OTX)** - IoC lookup, threat pulse search, malware research
 
+## CRITICAL: Time Period Limits
+
+**IMPORTANT**: Each tool has specific limits on how far back you can query data:
+
+- **NASA FIRMS (detect_thermal_anomalies)**: `day_range` parameter - **1-10 days maximum** (default: 7 days)
+- **GDELT News (search_news)**: `timespan` parameter - Format: "7d", "24h", "30m" (default: "7d")
+- **IODA Connectivity (check_connectivity)**: `hours_back` parameter - **1-168 hours maximum** (7 days, default: 24 hours)
+- **IODA Outages (get_outages)**: `days_back` parameter - **1-90 days maximum** (default: 7 days)
+- **Telegram (search_telegram)**: `hours_back` parameter - **1-168 hours maximum** (7 days, default: 24 hours)
+
+**Always respect these limits when planning queries.** If you need data from a longer period, you may need to make multiple queries or adjust your investigation timeframe.
+
 ## CRITICAL: Data Integrity Rules
 
 **NEVER FABRICATE OR HALLUCINATE DATA.** This is the most important rule.
@@ -61,7 +73,7 @@ Consider:
 - What regions are relevant to this topic?
 - What keywords would surface relevant news?
 - Are there specific coordinates where satellite monitoring would be valuable?
-- What time range is most relevant?
+- What time range is most relevant? **Remember the limits: NASA FIRMS (1-10 days), IODA Connectivity (1-168 hours), IODA Outages (1-90 days), Telegram (1-168 hours)**
 - Which data sources are most likely to have relevant information?
 
 ## CRITICAL: News Search Tools
@@ -235,20 +247,21 @@ Queries executed: {num_queries}
 
 Should we gather more data, or is it time to synthesize the final report?
 
-## CRITICAL: Required Parameters for Queries
+## CRITICAL: Required Parameters and Time Limits for Queries
 
-**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters and TIME LIMITS:
 
-| Tool | Required Parameters |
-|------|---------------------|
-| `search_news` | `keywords` (REQUIRED) |
-| `fetch_rss_news` | `source` (REQUIRED) |
-| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) |
-| `check_connectivity` | `country_code` (REQUIRED) |
-| `check_traffic_metrics` | `country_code` (REQUIRED) |
-| `check_ioc` | `indicator` (REQUIRED) |
-| `search_threats` | `query` (REQUIRED) |
-| `search_telegram` | `keywords` (REQUIRED) |
+| Tool | Required Parameters | Time Limits |
+|------|---------------------|-------------|
+| `search_news` | `keywords` (REQUIRED) | `timespan`: "7d", "24h", "30m" (default: "7d") |
+| `fetch_rss_news` | `source` (REQUIRED) | N/A |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `day_range`: **1-10 days** (default: 7) |
+| `check_connectivity` | `country_code` (REQUIRED) | `hours_back`: **1-168 hours** (default: 24) |
+| `get_outages` | N/A (optional params) | `days_back`: **1-90 days** (default: 7) |
+| `check_traffic_metrics` | `country_code` (REQUIRED) | Fixed 7 days |
+| `check_ioc` | `indicator` (REQUIRED) | N/A |
+| `search_threats` | `query` (REQUIRED) | N/A |
+| `search_telegram` | `keywords` (REQUIRED) | `hours_back`: **1-168 hours** (default: 24) |
 
 ### For search_news:
 - OR operators MUST be inside parentheses
@@ -483,20 +496,21 @@ Critically examine the analysis so far and identify:
 
 Be harsh but fair. The goal is to improve the analysis, not to criticize.
 
-## CRITICAL: Required Parameters for investigation_suggestions
+## CRITICAL: Required Parameters and Time Limits for investigation_suggestions
 
-**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters and TIME LIMITS:
 
-| Tool | Required Parameters | Example |
-|------|---------------------|---------|
-| `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
-| `fetch_rss_news` | `source` (REQUIRED) | `{{"source": "meduza", "max_articles": 20}}` |
-| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
-| `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `check_ioc` | `indicator` (REQUIRED) | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
-| `search_threats` | `query` (REQUIRED) | `{{"query": "APT28 Russia"}}` |
-| `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
+| Tool | Required Parameters | Time Limits | Example |
+|------|---------------------|-------------|---------|
+| `search_news` | `keywords` (REQUIRED) | `timespan`: "7d", "24h", "30m" | `{{"keywords": "(term1 OR term2) AND term3", "timespan": "7d"}}` |
+| `fetch_rss_news` | `source` (REQUIRED) | N/A | `{{"source": "meduza", "max_articles": 20}}` |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `day_range`: **1-10 days** | `{{"latitude": 48.5, "longitude": 37.5, "day_range": 7}}` |
+| `check_connectivity` | `country_code` (REQUIRED) | `hours_back`: **1-168 hours** | `{{"country_code": "UA", "hours_back": 24}}` |
+| `get_outages` | N/A (optional params) | `days_back`: **1-90 days** | `{{"entity_type": "country", "entity_code": "UA", "days_back": 7}}` |
+| `check_traffic_metrics` | `country_code` (REQUIRED) | Fixed 7 days | `{{"country_code": "UA"}}` |
+| `check_ioc` | `indicator` (REQUIRED) | N/A | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
+| `search_threats` | `query` (REQUIRED) | N/A | `{{"query": "APT28 Russia"}}` |
+| `search_telegram` | `keywords` (REQUIRED) | `hours_back`: **1-168 hours** | `{{"keywords": "missile", "hours_back": 24}}` |
 
 ### Syntax Rules for search_news:
 - OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
@@ -647,20 +661,21 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 4. Confidence levels with justification
 5. What additional information would help
 
-## CRITICAL: Required Parameters for Follow-up Queries
+## CRITICAL: Required Parameters and Time Limits for Follow-up Queries
 
-**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters:
+**NEVER suggest queries with empty args!** Each tool has REQUIRED parameters and TIME LIMITS:
 
-| Tool | Required Parameters | Example |
-|------|---------------------|---------|
-| `search_news` | `keywords` (REQUIRED) | `{{"keywords": "(term1 OR term2) AND term3"}}` |
-| `fetch_rss_news` | `source` (REQUIRED) | `{{"source": "meduza", "max_articles": 20}}` |
-| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `{{"latitude": 48.5, "longitude": 37.5}}` |
-| `check_connectivity` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `check_traffic_metrics` | `country_code` (REQUIRED) | `{{"country_code": "UA"}}` |
-| `check_ioc` | `indicator` (REQUIRED) | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
-| `search_threats` | `query` (REQUIRED) | `{{"query": "APT28 Russia"}}` |
-| `search_telegram` | `keywords` (REQUIRED) | `{{"keywords": ["term1", "term2"]}}` |
+| Tool | Required Parameters | Time Limits | Example |
+|------|---------------------|-------------|---------|
+| `search_news` | `keywords` (REQUIRED) | `timespan`: "7d", "24h", "30m" | `{{"keywords": "(term1 OR term2) AND term3", "timespan": "7d"}}` |
+| `fetch_rss_news` | `source` (REQUIRED) | N/A | `{{"source": "meduza", "max_articles": 20}}` |
+| `detect_thermal_anomalies` | `latitude`, `longitude` (REQUIRED) | `day_range`: **1-10 days** | `{{"latitude": 48.5, "longitude": 37.5, "day_range": 7}}` |
+| `check_connectivity` | `country_code` (REQUIRED) | `hours_back`: **1-168 hours** | `{{"country_code": "UA", "hours_back": 24}}` |
+| `get_outages` | N/A (optional params) | `days_back`: **1-90 days** | `{{"entity_type": "country", "entity_code": "UA", "days_back": 7}}` |
+| `check_traffic_metrics` | `country_code` (REQUIRED) | Fixed 7 days | `{{"country_code": "UA"}}` |
+| `check_ioc` | `indicator` (REQUIRED) | N/A | `{{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}` |
+| `search_threats` | `query` (REQUIRED) | N/A | `{{"query": "APT28 Russia"}}` |
+| `search_telegram` | `keywords` (REQUIRED) | `hours_back`: **1-168 hours** | `{{"keywords": "missile", "hours_back": 24}}` |
 
 ### Syntax Rules for search_news:
 - OR operators MUST be inside parentheses: `"(term1 OR term2) AND term3"`
@@ -671,8 +686,12 @@ ENHANCED_ANALYST_PROMPT = f"""You are analyzing collected intelligence findings 
 - max_articles is optional (default: 20, range: 1-50)
 
 **INVALID (will fail):** `{{"tool": "search_news", "args": {{}}, "reason": "..."}}`
+**INVALID (will fail):** `{{"tool": "check_ioc", "args": {{}}, "reason": "..."}}`  ← Missing required 'indicator' parameter
+**INVALID (will fail):** `{{"tool": "check_traffic_metrics", "args": {{"metric": "attacks"}}, "reason": "..."}}`  ← Missing required 'country_code' parameter
 **VALID:** `{{"tool": "search_news", "args": {{"keywords": "(Ukraine OR Donetsk) AND attack"}}, "reason": "..."}}`
 **VALID:** `{{"tool": "fetch_rss_news", "args": {{"source": "meduza"}}, "reason": "..."}}`
+**VALID:** `{{"tool": "check_ioc", "args": {{"indicator": "8.8.8.8", "indicator_type": "IPv4"}}, "reason": "..."}}`
+**VALID:** `{{"tool": "check_traffic_metrics", "args": {{"country_code": "UA", "metric": "traffic"}}, "reason": "..."}}`
 
 Be analytical and systematic. Note uncertainties explicitly.
 """
@@ -699,22 +718,49 @@ When citing sources in the detailed_report:
 
 Use inline citations throughout the report. At the end of the detailed_report, include a "## Sources" section listing all sources used.
 
+## CRITICAL: Avoid Repetition
+
+**DO NOT repeat the same information multiple times.**
+- Consolidate similar insights into a single, comprehensive statement
+- Group related correlations together instead of listing them separately
+- Avoid restating the same evidence in different sections
+- If multiple correlations share the same implications, merge them
+- Key insights should be unique and non-overlapping
+
 ## Multi-Step Synthesis Process
 
 1. **Structure the narrative**: What's the most logical order to present findings?
 2. **Weigh the evidence**: What's strongly supported vs. tentative?
-3. **Address uncertainties**: What don't we know and why does it matter?
-4. **Draw conclusions**: What can we confidently conclude?
-5. **Make recommendations**: What actions or further research is suggested?
+3. **Consolidate**: Group similar findings and avoid repetition
+4. **Address uncertainties**: What don't we know and why does it matter?
+5. **Draw conclusions**: What can we confidently conclude?
+6. **Make recommendations**: What actions or further research is suggested?
 
 ## Report Requirements
 
-1. Executive summary (2-3 sentences, key takeaways only)
-2. Detailed analysis with INLINE SOURCE CITATIONS for every claim
-3. A "## Sources" section at the end of detailed_report listing all sources
-4. Confidence levels for each major conclusion
-5. Clear statement of what data was NOT available
-6. Actionable recommendations
+1. **Executive summary**: 2-3 sentences, key takeaways only (NO repetition of detailed content)
+2. **Detailed analysis**: 
+   - MUST be a complete markdown-formatted text (NOT JSON, NOT just a brace "{")
+   - Single narrative flow, not a list of bullet points
+   - INLINE SOURCE CITATIONS for every claim
+   - Group related findings together
+   - Avoid repeating the same information
+   - A "## Sources" section at the end listing all sources used
+   - Minimum 3-4 paragraphs of substantive analysis
+   - DO NOT return empty strings, single characters, or JSON syntax
+3. **Key insights**: Only unique, non-overlapping insights (max 5-7 items)
+4. **Confidence assessment**: Brief overall statement, not item-by-item
+5. **Actionable recommendations**: 3-5 focused recommendations
 
-Use markdown formatting for the detailed report.
+## CRITICAL: detailed_report Format
+
+The `detailed_report` field MUST be a complete markdown text string, NOT:
+- ❌ Empty string ""
+- ❌ Single character "{"
+- ❌ JSON object syntax
+- ❌ Incomplete text
+
+✅ It MUST be a full markdown document with paragraphs, citations, and a Sources section.
+
+Use markdown formatting for the detailed report. Be concise and avoid redundancy.
 """

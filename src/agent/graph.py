@@ -16,23 +16,21 @@ from mcp.client.sse import sse_client
 from src.agent.state import AgentState, ResearchPhase, create_initial_state
 from src.shared.config import settings
 from src.agent.nodes import (
-    # Traditional nodes
-    plan_research,
-    gather_intelligence,
-    analyze_findings,
-    correlate_findings,
-    synthesize_report,
+    PlanningNode,
+    DecompositionNode,
+    HypothesisGenerationNode,
+    HypothesisUpdateNode,
+    AnalysisNode,
+    ReflectionNode,
+    CorrelationNode,
+    VerificationNode,
+    SynthesisNode,
     route_next_step,
-    # Multi-step Reasoning nodes
-    decompose_task,
-    generate_hypotheses,
-    update_hypotheses,
-    reflect_on_analysis,
-    verify_conclusions,
+    gather_intelligence,
 )
-from src.agent.tools import MCPToolExecutor
+from src.agent.tools import MCPToolExecutor, VALID_TOOL_NAMES
 from src.shared.config import settings
-from src.shared.logger import get_logger, log_startup_banner, log_agent_result
+from src.shared.logger import get_logger, log_startup_banner, log_agent_result, log_tools_table
 from src.shared.output_writer import get_output_writer, reset_output_writer
 
 logger = get_logger()
@@ -164,57 +162,33 @@ def build_research_graph(
     # Create the graph with our state schema
     graph = StateGraph(AgentState)
     
-    # === Add Nodes ===
+    # === Initialize Node Strategies ===
+    planning_node = PlanningNode(llm)
+    decomposition_node = DecompositionNode(llm)
+    hypothesis_node = HypothesisGenerationNode(llm)
+    analysis_node = AnalysisNode(llm)
+    reflection_node = ReflectionNode(llm)
+    correlation_node = CorrelationNode(llm)
+    verification_node = VerificationNode(llm)
+    synthesis_node = SynthesisNode(llm)
     
-    # Planning node - creates the research plan
-    async def plan_node(state: AgentState) -> dict[str, Any]:
-        return await plan_research(state, llm)
-    
-    # Decomposition node - breaks complex tasks into sub-tasks
-    async def decompose_node(state: AgentState) -> dict[str, Any]:
-        return await decompose_task(state, llm)
-    
-    # Hypothesis generation node - forms testable hypotheses
-    async def hypothesize_node(state: AgentState) -> dict[str, Any]:
-        return await generate_hypotheses(state, llm)
-    
-    # Gather node - placeholder that will be replaced per-run
+    # Gather node - placeholder that will be replaced per-run (needs tool_executor)
     async def gather_node(state: AgentState) -> dict[str, Any]:
         return {
             "current_phase": ResearchPhase.ANALYZING.value,
             "iteration": state["iteration"] + 1,
         }
     
-    # Analysis node
-    async def analyze_node(state: AgentState) -> dict[str, Any]:
-        return await analyze_findings(state, llm)
-    
-    # Reflection node - self-critique and bias check
-    async def reflect_node(state: AgentState) -> dict[str, Any]:
-        return await reflect_on_analysis(state, llm)
-    
-    # Correlation node
-    async def correlate_node(state: AgentState) -> dict[str, Any]:
-        return await correlate_findings(state, llm)
-    
-    # Verification node - verify conclusions before synthesis
-    async def verify_node(state: AgentState) -> dict[str, Any]:
-        return await verify_conclusions(state, llm)
-    
-    # Synthesis node
-    async def synthesize_node(state: AgentState) -> dict[str, Any]:
-        return await synthesize_report(state, llm)
-    
-    # Add all nodes (including multi-step reasoning nodes)
-    graph.add_node("plan", plan_node)
-    graph.add_node("decompose", decompose_node)
-    graph.add_node("hypothesize", hypothesize_node)
+    # === Add Nodes ===
+    graph.add_node("plan", planning_node.execute)
+    graph.add_node("decompose", decomposition_node.execute)
+    graph.add_node("hypothesize", hypothesis_node.execute)
     graph.add_node("gather", gather_node)
-    graph.add_node("analyze", analyze_node)
-    graph.add_node("reflect", reflect_node)
-    graph.add_node("correlate", correlate_node)
-    graph.add_node("verify", verify_node)
-    graph.add_node("synthesize", synthesize_node)
+    graph.add_node("analyze", analysis_node.execute)
+    graph.add_node("reflect", reflection_node.execute)
+    graph.add_node("correlate", correlation_node.execute)
+    graph.add_node("verify", verification_node.execute)
+    graph.add_node("synthesize", synthesis_node.execute)
     
     # === Add Edges ===
     
@@ -393,6 +367,39 @@ class DeepResearchAgent:
                     await session.initialize()
                     logger.success("Connected to MCP server")
                     
+                    # List available tools from MCP server
+                    try:
+                        tools_result = await session.list_tools()
+                        available_tools = []
+                        tool_categories = {
+                            "search_news": "📰 News",
+                            "fetch_rss_news": "📰 News",
+                            "detect_thermal_anomalies": "🛰️ Satellite",
+                            "check_connectivity": "🌐 Cyber",
+                            "get_outages": "🌐 Cyber",
+                            "check_traffic_metrics": "🌐 Cyber",
+                            "search_telegram": "📱 Telegram",
+                            "get_channel_info": "📱 Telegram",
+                            "list_osint_channels": "📱 Telegram",
+                            "check_ioc": "🔍 Threat Intel",
+                            "get_threat_pulse": "🔍 Threat Intel",
+                            "search_threats": "🔍 Threat Intel",
+                        }
+                        
+                        for tool in tools_result.tools:
+                            category = tool_categories.get(tool.name, "🔧 Other")
+                            description = tool.description or "No description"
+                            # Truncate long descriptions
+                            if len(description) > 60:
+                                description = description[:57] + "..."
+                            available_tools.append((tool.name, category, description))
+                        
+                        # Log tools table
+                        log_tools_table(available_tools)
+                    except Exception as e:
+                        logger.warning(f"Could not list tools from MCP server: {e}")
+                        logger.info(f"Using {len(VALID_TOOL_NAMES)} tools from VALID_TOOL_NAMES")
+                    
                     # Create tool executor with active session
                     tool_executor = MCPToolExecutor(session)
                     
@@ -442,6 +449,17 @@ class DeepResearchAgent:
         """
         state = initial_state
         
+        # Initialize node strategies
+        planning_node = PlanningNode(self.llm)
+        decomposition_node = DecompositionNode(self.llm)
+        hypothesis_node = HypothesisGenerationNode(self.llm)
+        hypothesis_update_node = HypothesisUpdateNode(self.llm)
+        analysis_node = AnalysisNode(self.llm)
+        reflection_node = ReflectionNode(self.llm)
+        correlation_node = CorrelationNode(self.llm)
+        verification_node = VerificationNode(self.llm)
+        synthesis_node = SynthesisNode(self.llm)
+        
         while state["current_phase"] != ResearchPhase.COMPLETE.value:
             # Check iteration limit
             if state["iteration"] >= state["max_iterations"]:
@@ -451,17 +469,20 @@ class DeepResearchAgent:
             phase = state["current_phase"]
             
             if phase == ResearchPhase.PLANNING.value:
-                updates = await plan_research(state, self.llm)
+                updates = await planning_node.execute(state)
+                updates["current_phase"] = planning_node.get_next_phase(state, updates)
                 state = {**state, **updates}
             
             # Multi-step Reasoning: Task Decomposition
             elif phase == ResearchPhase.DECOMPOSING.value:
-                updates = await decompose_task(state, self.llm)
+                updates = await decomposition_node.execute(state)
+                updates["current_phase"] = decomposition_node.get_next_phase(state, updates)
                 state = {**state, **updates}
             
             # Multi-step Reasoning: Hypothesis Generation
             elif phase == ResearchPhase.HYPOTHESIZING.value:
-                updates = await generate_hypotheses(state, self.llm)
+                updates = await hypothesis_node.execute(state)
+                updates["current_phase"] = hypothesis_node.get_next_phase(state, updates)
                 state = {**state, **updates}
                 
             elif phase == ResearchPhase.GATHERING.value:
@@ -469,29 +490,35 @@ class DeepResearchAgent:
                 state = {**state, **updates}
                 # After gathering, update hypotheses if we have any
                 if state.get("hypotheses"):
-                    updates = await update_hypotheses(state, self.llm)
+                    updates = await hypothesis_update_node.execute(state)
+                    updates["current_phase"] = hypothesis_update_node.get_next_phase(state, updates)
                     state = {**state, **updates}
                 
             elif phase == ResearchPhase.ANALYZING.value:
-                updates = await analyze_findings(state, self.llm)
+                updates = await analysis_node.execute(state)
+                updates["current_phase"] = analysis_node.get_next_phase(state, updates)
                 state = {**state, **updates}
             
             # Multi-step Reasoning: Self-Reflection
             elif phase == ResearchPhase.REFLECTING.value:
-                updates = await reflect_on_analysis(state, self.llm)
+                updates = await reflection_node.execute(state)
+                updates["current_phase"] = reflection_node.get_next_phase(state, updates)
                 state = {**state, **updates}
                 
             elif phase == ResearchPhase.CORRELATING.value:
-                updates = await correlate_findings(state, self.llm)
+                updates = await correlation_node.execute(state)
+                updates["current_phase"] = correlation_node.get_next_phase(state, updates)
                 state = {**state, **updates}
             
             # Multi-step Reasoning: Verification
             elif phase == ResearchPhase.VERIFYING.value:
-                updates = await verify_conclusions(state, self.llm)
+                updates = await verification_node.execute(state)
+                updates["current_phase"] = verification_node.get_next_phase(state, updates)
                 state = {**state, **updates}
                 
             elif phase == ResearchPhase.SYNTHESIZING.value:
-                updates = await synthesize_report(state, self.llm)
+                updates = await synthesis_node.execute(state)
+                updates["current_phase"] = synthesis_node.get_next_phase(state, updates)
                 state = {**state, **updates}
                 
             else:

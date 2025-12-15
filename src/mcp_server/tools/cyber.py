@@ -502,6 +502,32 @@ async def check_cloudflare_radar(
                     "Create a new token with Account > Radar > Read at: "
                     "https://dash.cloudflare.com/profile/api-tokens",
                 }
+            elif response.status_code == 400:
+                # Try to parse error details
+                try:
+                    error_data = response.json()
+                    errors = error_data.get("errors", [])
+                    if errors:
+                        error_msg = errors[0].get("message", "Bad request")
+                        error_code = errors[0].get("code", "")
+                        return {
+                            "status": "error",
+                            "query_params": query_params,
+                            "error_message": f"Cloudflare Radar API error (code {error_code}): {error_msg}. "
+                            f"The endpoint '{endpoint}' may not support the 'location' parameter, "
+                            f"or the API structure may have changed. Try using metric='traffic' instead.",
+                        }
+                except:
+                    pass
+                
+                return {
+                    "status": "error",
+                    "query_params": query_params,
+                    "error_message": f"Cloudflare Radar returned HTTP 400 (Bad Request). "
+                    f"The endpoint may not support the requested parameters. "
+                    f"Try using metric='traffic' instead of '{metric}'.",
+                    "raw_response": response.text[:500],
+                }
             else:
                 return {
                     "status": "error",

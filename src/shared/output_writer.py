@@ -8,11 +8,16 @@ Handles writing research outputs:
 
 import os
 import json
+import re
+from collections import defaultdict, Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.shared.config import settings
+from src.shared.logger import get_logger
+
+logger = get_logger()
 
 
 class OutputWriter:
@@ -331,62 +336,136 @@ Response:
             "",
         ]
         
-        # Key Insights
+        # Key Insights - Clean and deduplicate
         if key_insights:
-            report_lines.extend([
-                "---",
-                "",
-                "## Key Insights",
-                "",
-            ])
-            for i, insight in enumerate(key_insights, 1):
-                if insight:
-                    if isinstance(insight, dict):
-                        insight_text = insight.get("description", str(insight))
-                    else:
-                        insight_text = str(insight)
-                    report_lines.append(f"{i}. {insight_text}")
-            report_lines.append("")
+            # Clean insights: remove numbered prefixes, extract text from dicts, deduplicate
+            cleaned_insights = []
+            seen_insights = set()
+            
+            for insight in key_insights:
+                if not insight:
+                    continue
+                    
+                # Extract text from dict or string
+                if isinstance(insight, dict):
+                    insight_text = insight.get("description", str(insight))
+                else:
+                    insight_text = str(insight)
+                
+                # Remove numbered prefixes like "1. ", "2. ", etc.
+                insight_text = re.sub(r'^\d+\.\s*', '', insight_text.strip())
+                
+                # Remove common prefixes that indicate structure
+                insight_text = re.sub(r'^(Key patterns observed|Notable events|Preliminary correlations|How findings|Confidence assessment|Areas requiring):\s*', '', insight_text, flags=re.IGNORECASE)
+                
+                # Normalize and deduplicate
+                normalized = insight_text.lower().strip()
+                if normalized and normalized not in seen_insights and len(insight_text) > 10:
+                    seen_insights.add(normalized)
+                    cleaned_insights.append(insight_text)
+            
+            # Limit to most important insights (max 7)
+            if cleaned_insights:
+                report_lines.extend([
+                    "---",
+                    "",
+                    "## Key Insights",
+                    "",
+                ])
+                for i, insight in enumerate(cleaned_insights[:7], 1):
+                    report_lines.append(f"{i}. {insight}")
+                report_lines.append("")
         
-        # Detailed Report
+        # Detailed Report - Validate before including
         if detailed_report:
-            report_lines.extend([
-                "---",
-                "",
-                "## Detailed Analysis",
-                "",
-                detailed_report,
-                "",
-            ])
+            # Clean and validate detailed_report
+            detailed_report = detailed_report.strip()
+            
+            # Skip if it's just malformed JSON or empty
+            if detailed_report in ["{", "}", "{}", ""] or len(detailed_report) < 10:
+                logger.warning("⚠️ Detailed report is malformed or too short, skipping section")
+                detailed_report = None
+            
+            if detailed_report:
+                report_lines.extend([
+                    "---",
+                    "",
+                    "## Detailed Analysis",
+                    "",
+                    detailed_report,
+                    "",
+                ])
         
-        # Correlations
+        # Correlations - Consolidate similar ones
         if correlations:
-            report_lines.extend([
-                "---",
-                "",
-                "## Correlations Found",
-                "",
-            ])
+            # Group correlations by type and consolidate similar descriptions
+            correlations_by_type = defaultdict(list)
+            
             for corr in correlations:
                 corr_type = corr.get("correlation_type", "unknown")
-                description = corr.get("description", "No description")
-                confidence = corr.get("confidence", "unknown")
-                implications = corr.get("implications", [])
-                
+                correlations_by_type[corr_type].append(corr)
+            
+            if correlations_by_type:
                 report_lines.extend([
-                    f"### {corr_type.title()} Correlation",
+                    "---",
                     "",
-                    f"**Confidence:** {confidence}",
-                    "",
-                    description,
+                    "## Correlations Found",
                     "",
                 ])
                 
-                if implications:
-                    report_lines.append("**Implications:**")
-                    for imp in implications:
-                        report_lines.append(f"- {imp}")
-                    report_lines.append("")
+                for corr_type, corr_list in correlations_by_type.items():
+                    # Consolidate similar correlations
+                    unique_descriptions = {}
+                    all_implications = []
+                    confidences = []
+                    
+                    for corr in corr_list:
+                        description = corr.get("description", "No description")
+                        confidence = corr.get("confidence", "unknown")
+                        implications = corr.get("implications", [])
+                        
+                        # Normalize description for deduplication
+                        desc_key = description.lower().strip()[:100]  # First 100 chars
+                        
+                        if desc_key not in unique_descriptions:
+                            unique_descriptions[desc_key] = description
+                        
+                        confidences.append(confidence)
+                        all_implications.extend(implications)
+                    
+                    # Use most common confidence level
+                    most_common_conf = Counter(confidences).most_common(1)[0][0] if confidences else "unknown"
+                    
+                    # Deduplicate implications
+                    unique_implications = list(dict.fromkeys(all_implications))  # Preserves order
+                    
+                    # Only show if we have meaningful content
+                    if unique_descriptions:
+                        report_lines.extend([
+                            f"### {corr_type.title()} Correlation{'s' if len(corr_list) > 1 else ''}",
+                            "",
+                            f"**Confidence:** {most_common_conf}",
+                            "",
+                        ])
+                        
+                        # Show consolidated description(s)
+                        if len(unique_descriptions) == 1:
+                            report_lines.append(list(unique_descriptions.values())[0])
+                        else:
+                            # Multiple unique correlations of same type
+                            for desc in list(unique_descriptions.values())[:3]:  # Limit to 3
+                                report_lines.append(f"- {desc}")
+                        
+                        report_lines.append("")
+                        
+                        # Show unique implications (limit to 3)
+                        if unique_implications:
+                            report_lines.append("**Implications:**")
+                            for imp in unique_implications[:3]:
+                                report_lines.append(f"- {imp}")
+                            if len(unique_implications) > 3:
+                                report_lines.append(f"- ... and {len(unique_implications) - 3} more")
+                            report_lines.append("")
         
         # Recommendations
         if recommendations:
@@ -432,23 +511,32 @@ Response:
                 "",
             ])
             
-            # Hypotheses
+            # Hypotheses - Only show relevant ones (tested or high confidence)
             if state.get("hypotheses"):
-                report_lines.extend([
-                    "### Hypotheses Tested",
-                    "",
-                ])
+                relevant_hypotheses = []
                 for h in state["hypotheses"]:
-                    status_emoji = {
-                        "supported": "✅",
-                        "refuted": "❌",
-                        "investigating": "🔍",
-                        "inconclusive": "❓",
-                        "proposed": "📝",
-                    }.get(h.get("status", "proposed"), "📝")
+                    status = h.get("status", "proposed")
                     conf = h.get("confidence", 0)
-                    report_lines.append(f"- {status_emoji} **{h.get('id', 'H?')}**: {h.get('statement', 'No statement')} (confidence: {conf:.0%})")
-                report_lines.append("")
+                    # Only include if: tested (not just proposed) OR high confidence (>0.5)
+                    if status != "proposed" or conf > 0.5:
+                        relevant_hypotheses.append(h)
+                
+                if relevant_hypotheses:
+                    report_lines.extend([
+                        "### Hypotheses Tested",
+                        "",
+                    ])
+                    for h in relevant_hypotheses:
+                        status_emoji = {
+                            "supported": "✅",
+                            "refuted": "❌",
+                            "investigating": "🔍",
+                            "inconclusive": "❓",
+                            "proposed": "📝",
+                        }.get(h.get("status", "proposed"), "📝")
+                        conf = h.get("confidence", 0)
+                        report_lines.append(f"- {status_emoji} **{h.get('id', 'H?')}**: {h.get('statement', 'No statement')} (confidence: {conf:.0%})")
+                    report_lines.append("")
             
             # Reflection summary
             if state.get("reflection_notes"):
@@ -519,39 +607,55 @@ Response:
                 success_count = info["success"]
                 failed_count = info["failed"]
                 
+                # Only show sources with successful queries or if they're important
+                if success_count == 0 and failed_count > 0:
+                    # Skip sources that only failed, unless explicitly needed
+                    continue
+                
                 status_icon = "✅" if failed_count == 0 else "⚠️" if success_count > 0 else "❌"
                 
                 report_lines.append(f"### {status_icon} {source_name}")
                 report_lines.append("")
-                report_lines.append(f"- **Queries:** {success_count + failed_count} total ({success_count} successful, {failed_count} failed)")
                 
-                # Show query details
-                for q in info["queries"][:5]:  # Limit to first 5
-                    args = q.get("args", {})
-                    status = "✓" if q.get("status") == "success" else "✗"
+                if success_count > 0:
+                    report_lines.append(f"- **Successful queries:** {success_count}")
+                    if failed_count > 0:
+                        report_lines.append(f"- **Failed queries:** {failed_count}")
+                else:
+                    report_lines.append(f"- **Queries:** {failed_count} (all failed)")
+                
+                # Show only successful query details (limit to 3)
+                successful_queries = [q for q in info["queries"] if q.get("status") == "success"]
+                if successful_queries:
+                    report_lines.append("")
+                    for q in successful_queries[:3]:
+                        args = q.get("args", {})
+                        
+                        # Format query args nicely
+                        if tool == "search_news":
+                            keywords = args.get("keywords", "N/A")
+                            country = args.get("source_country", "Global")
+                            report_lines.append(f"  - Keywords: `{keywords[:50]}{'...' if len(keywords) > 50 else ''}` | Source: {country}")
+                        elif tool == "detect_thermal_anomalies":
+                            lat = args.get("latitude", "?")
+                            lon = args.get("longitude", "?")
+                            radius = args.get("radius_km", "?")
+                            report_lines.append(f"  - Location: ({lat}, {lon}) | Radius: {radius}km")
+                        elif tool == "check_connectivity":
+                            region = args.get("region_name") or args.get("country_code", "N/A")
+                            report_lines.append(f"  - Region: {region}")
+                        elif tool == "check_traffic_metrics":
+                            country = args.get("country_code", "N/A")
+                            metric = args.get("metric", "traffic")
+                            report_lines.append(f"  - Country: {country} | Metric: {metric}")
+                        else:
+                            # Simplified format for other tools
+                            key_args = {k: v for k, v in args.items() if k in ["query", "indicator", "source"]}
+                            if key_args:
+                                report_lines.append(f"  - {key_args}")
                     
-                    # Format query args nicely
-                    if tool == "search_news":
-                        keywords = args.get("keywords", "N/A")
-                        country = args.get("source_country", "Global")
-                        report_lines.append(f"  - {status} Keywords: `{keywords[:50]}...` | Source: {country}")
-                    elif tool == "detect_thermal_anomalies":
-                        lat = args.get("latitude", "?")
-                        lon = args.get("longitude", "?")
-                        radius = args.get("radius_km", "?")
-                        report_lines.append(f"  - {status} Location: ({lat}, {lon}) | Radius: {radius}km")
-                    elif tool == "check_connectivity":
-                        region = args.get("region_name") or args.get("country_code", "N/A")
-                        report_lines.append(f"  - {status} Region: {region}")
-                    elif tool == "check_traffic_metrics":
-                        country = args.get("country_code", "N/A")
-                        metric = args.get("metric", "traffic")
-                        report_lines.append(f"  - {status} Country: {country} | Metric: {metric}")
-                    else:
-                        report_lines.append(f"  - {status} {args}")
-                
-                if len(info["queries"]) > 5:
-                    report_lines.append(f"  - ... and {len(info['queries']) - 5} more queries")
+                    if len(successful_queries) > 3:
+                        report_lines.append(f"  - ... and {len(successful_queries) - 3} more successful queries")
                 
                 report_lines.append("")
             

@@ -749,6 +749,7 @@ def main() -> None:
     # Show registered tools
     tools_info = [
         ("search_news", "📰 News", "Search GDELT for news articles"),
+        ("fetch_rss_news", "📰 News", "Fetch RSS feeds from independent sources"),
         ("detect_thermal_anomalies", "🛰️ Satellite", "NASA FIRMS fire detection"),
         ("check_connectivity", "🌐 Cyber", "IODA connectivity status"),
         ("get_outages", "🌐 Cyber", "IODA detected outage events"),
