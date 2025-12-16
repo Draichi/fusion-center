@@ -4,6 +4,55 @@
 
 Project Overwatch is an autonomous intelligence system that combines a Model Context Protocol (MCP) server with an AI agent for Open Source Intelligence (OSINT) analysis. It correlates data from news media, satellite imagery, and internet infrastructure monitoring.
 
+## 🌟 Introduction & Proven Capabilities
+
+Fusion Center isn't just a data fetcher; it's a **Correlation Engine**. Its true power lies in "triangulating" the truth by cross-referencing signals from three distinct domains:
+1.  **Physical** (Satellite Thermal Anomalies)
+2.  **Digital** (Internet Traffic & Outages)
+3.  **Informational** (News, Telegram, Threat Intel)
+
+<div align="center">
+  <h3>🎥 Watch the Agent in Action</h3>
+  <!-- VIDEO PLACEHOLDER: Fusion Center Agent Generating Intelligence Report -->
+  <img src="https://placehold.co/800x450?text=Fusion+Center+Agent+Demo+Video+(Coming+Soon)" alt="Fusion Center Demo" width="100%" />
+  <p><i>Demonstration: The Agent performing a multi-step analysis on live data.</i></p>
+</div>
+
+### 💡 Exemplary Queries (Showcase)
+
+To see the agent at its full potential, try these queries that force multi-domain correlation:
+
+#### 1. The "Words vs. Actions" Divergence Test (Diplomacy vs. Reality)
+> "Analyze the trend of 'thermal anomaly' intensity in the Donbas region over the last 14 days using NASA FIRMS data and correlate it with the sentiment of GDELT news articles containing keywords 'negotiation', 'peace talks', or 'diplomats'. **Hypothesis:** If news sentiment is positive (talks) but thermal anomalies are rising (kinetic), the probability of a ceasefire is LOW."
+*   **Why it works:** Validates if diplomatic rhetoric is supported by ground-truth physics or if it's a distraction.
+
+#### 2. The "Silent De-escalation" (Cyber & Infrastructure)
+> "Check IODA and Cloudflare Radar for a reduction in critical infrastructure outages or DDoS attack traffic in Ukraine over the past week. Correlate this with any 'goodwill' statements found in RSS feeds. **Premise:** Ceasefires often begin with a reduction in strategic infrastructure targeting."
+
+#### 3. The "Propaganda Verification" (Information War)
+> "Compare the official narrative found in GDELT state media reports regarding border tensions with the raw sentiment and photos describing troop movements in local Telegram OSINT channels. Also, check AlienVault OTX for any spike in cyber threat indicators targeting that region."
+
+<details>
+<summary>📄 <b>Click to view Sample Intelligence Report Output</b></summary>
+
+```markdown
+# Intelligence Report
+**Generated:** 2024-05-15 14:30:22 | **Confidence:** High (0.85)
+**Task:** "Analyze 'thermal anomaly' vs 'peace talks' sentiment in Donbas (14d)"
+
+## Executive Summary
+Analysis indicates a **divergence** between diplomatic rhetoric and kinetic reality. News sentiment for "peace talks" increased 40%, yet thermal anomalies in Donbas spiked 15% (avg 150/day). **Current diplomatic statements are likely a stalling tactic.**
+
+## Key Insights
+1.  **Kinetic Intensity:** NASA FIRMS detected 2,450 thermal anomalies. High intensity suggests artillery, not wildfires.
+2.  **Rhetoric-Reality Gap:** "Negotiation" keywords in GDELT surged on May 10th, coinciding with the kinetic spike.
+3.  **Local Confirmation:** Telegram channels (`@rybar`) discuss "holding positions", contradicting the "peace" narrative.
+
+## Correlations Found
+*   **Temporal Divergence:** Inverse correlation between "peace talk" news volume and combat reduction.
+```
+</details>
+
 ## 🎯 Architecture
 
 ```
@@ -161,6 +210,9 @@ You can run the MCP server alone and connect multiple clients (agent, dashboard,
 
 ## 📁 Project Structure
 
+<details>
+<summary>📂 <b>Click to view Project Structure</b></summary>
+
 ```
 fusion-center/
 ├── pyproject.toml              # Dependencies and config
@@ -214,6 +266,7 @@ fusion-center/
         ├── logger.py           # Rich logging
         └── output_writer.py    # Report & reasoning log writer
 ```
+</details>
 
 ## 🔌 Integration Examples
 
@@ -287,6 +340,9 @@ python -m src.mcp_server.server --transport sse --port 8080
 ## 🧠 Multi-step Reasoning
 
 The agent uses advanced multi-step reasoning for deeper analysis:
+
+<details>
+<summary>🧠 <b>Click to view Multi-step Reasoning Flow</b></summary>
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
@@ -380,6 +436,7 @@ All reasoning steps are logged to `reasoning.log` including:
 - Hypothesis status updates with confidence scores
 - Self-reflection notes and identified issues
 - Verification results for insights and correlations
+</details>
 
 ## 🗺️ Roadmap
 
