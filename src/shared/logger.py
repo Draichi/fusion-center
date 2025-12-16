@@ -47,6 +47,7 @@ class OverwatchLogger:
         """Initialize the logger with Rich handler."""
         self.console = console
         self.name = name
+        self._bar = None
 
         # Set up Python logging with Rich handler
         log_level = level or os.getenv("LOG_LEVEL", "INFO")
@@ -66,6 +67,10 @@ class OverwatchLogger:
             ],
         )
         self._logger = logging.getLogger(name)
+        
+    def set_progress_bar(self, bar: Any) -> None:
+        """Set the active progress bar instance."""
+        self._bar = bar
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info message with cyan color."""
@@ -93,14 +98,20 @@ class OverwatchLogger:
 
     def agent(self, message: str) -> None:
         """Log agent-related message."""
+        if self._bar:
+            self._bar.text(f"🤖 {message}")
         self.console.print(f"[agent]🤖 AGENT:[/agent] {message}")
 
     def thinking(self, message: str) -> None:
         """Log agent thinking/reasoning."""
+        if self._bar:
+            self._bar.text(f"💭 Thinking...")
         self.console.print(f"[thinking]💭 {message}[/thinking]")
 
     def tool_call(self, tool_name: str, params: dict[str, Any]) -> None:
         """Log a tool call with formatted parameters."""
+        if self._bar:
+            self._bar.text(f"🔧 Tool: {tool_name}")
         params_str = ", ".join(f"{k}={v!r}" for k, v in params.items() if v is not None)
         self.console.print(
             f"[tool]🔧 TOOL:[/tool] [bold]{tool_name}[/bold]([data]{params_str}[/data])"

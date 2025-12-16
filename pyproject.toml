@@ -34,6 +34,7 @@ agent = [
     "langchain-ollama>=0.2.0",
     "langchain-openai>=0.2.0",
     "langgraph-checkpoint>=2.0.0",
+    "alive-progress>=3.0.0",
 ]
 
 [project.scripts]

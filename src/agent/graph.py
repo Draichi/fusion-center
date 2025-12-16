@@ -12,6 +12,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from alive_progress import alive_bar
 
 from src.agent.state import AgentState, ResearchPhase, create_initial_state
 from src.shared.config import settings
@@ -394,8 +395,6 @@ class DeepResearchAgent:
                                 description = description[:57] + "..."
                             available_tools.append((tool.name, category, description))
                         
-                        # Log tools table
-                        log_tools_table(available_tools)
                     except Exception as e:
                         logger.warning(f"Could not list tools from MCP server: {e}")
                         logger.info(f"Using {len(VALID_TOOL_NAMES)} tools from VALID_TOOL_NAMES")
@@ -460,69 +459,86 @@ class DeepResearchAgent:
         verification_node = VerificationNode(self.llm)
         synthesis_node = SynthesisNode(self.llm)
         
-        while state["current_phase"] != ResearchPhase.COMPLETE.value:
-            # Check iteration limit
-            if state["iteration"] >= state["max_iterations"]:
-                logger.warning("Max iterations reached, forcing synthesis")
-                state["current_phase"] = ResearchPhase.SYNTHESIZING.value
+        total_iterations = state["max_iterations"]
+        with alive_bar(total_iterations, manual=True, title="Deep Researching", bar="smooth", spinner=None, enrich_print=False) as bar:
+            logger.set_progress_bar(bar)
+            try:
+                while state["current_phase"] != ResearchPhase.COMPLETE.value:
+                    # Update bar with current phase
+                    current_phase_display = state["current_phase"].replace("_", " ").title()
+                    bar.text(f"Phase: {current_phase_display}")
+                    
+                    if total_iterations > 0:
+                        bar(min(1.0, state["iteration"] / total_iterations))
             
-            phase = state["current_phase"]
+                    # Check iteration limit
+                    if state["iteration"] >= state["max_iterations"]:
+                        logger.warning("Max iterations reached, forcing synthesis")
+                        state["current_phase"] = ResearchPhase.SYNTHESIZING.value
+                    
+                    phase = state["current_phase"]
+                    
+                    if phase == ResearchPhase.PLANNING.value:
+                        updates = await planning_node.execute(state)
+                        updates["current_phase"] = planning_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                    
+                    # Multi-step Reasoning: Task Decomposition
+                    elif phase == ResearchPhase.DECOMPOSING.value:
+                        updates = await decomposition_node.execute(state)
+                        updates["current_phase"] = decomposition_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                    
+                    # Multi-step Reasoning: Hypothesis Generation
+                    elif phase == ResearchPhase.HYPOTHESIZING.value:
+                        updates = await hypothesis_node.execute(state)
+                        updates["current_phase"] = hypothesis_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                        
+                    elif phase == ResearchPhase.GATHERING.value:
+                        updates = await gather_intelligence(state, tool_executor)
+                        state = {**state, **updates}
+                        # After gathering, update hypotheses if we have any
+                        if state.get("hypotheses"):
+                            updates = await hypothesis_update_node.execute(state)
+                            updates["current_phase"] = hypothesis_update_node.get_next_phase(state, updates)
+                            state = {**state, **updates}
+                        
+                    elif phase == ResearchPhase.ANALYZING.value:
+                        updates = await analysis_node.execute(state)
+                        updates["current_phase"] = analysis_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                    
+                    # Multi-step Reasoning: Self-Reflection
+                    elif phase == ResearchPhase.REFLECTING.value:
+                        updates = await reflection_node.execute(state)
+                        updates["current_phase"] = reflection_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                        
+                    elif phase == ResearchPhase.CORRELATING.value:
+                        updates = await correlation_node.execute(state)
+                        updates["current_phase"] = correlation_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                    
+                    # Multi-step Reasoning: Verification
+                    elif phase == ResearchPhase.VERIFYING.value:
+                        updates = await verification_node.execute(state)
+                        updates["current_phase"] = verification_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                        
+                    elif phase == ResearchPhase.SYNTHESIZING.value:
+                        updates = await synthesis_node.execute(state)
+                        updates["current_phase"] = synthesis_node.get_next_phase(state, updates)
+                        state = {**state, **updates}
+                        
+                    else:
+                        break
             
-            if phase == ResearchPhase.PLANNING.value:
-                updates = await planning_node.execute(state)
-                updates["current_phase"] = planning_node.get_next_phase(state, updates)
-                state = {**state, **updates}
+                # Ensure bar completes
+                bar(1.0)
             
-            # Multi-step Reasoning: Task Decomposition
-            elif phase == ResearchPhase.DECOMPOSING.value:
-                updates = await decomposition_node.execute(state)
-                updates["current_phase"] = decomposition_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-            
-            # Multi-step Reasoning: Hypothesis Generation
-            elif phase == ResearchPhase.HYPOTHESIZING.value:
-                updates = await hypothesis_node.execute(state)
-                updates["current_phase"] = hypothesis_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-                
-            elif phase == ResearchPhase.GATHERING.value:
-                updates = await gather_intelligence(state, tool_executor)
-                state = {**state, **updates}
-                # After gathering, update hypotheses if we have any
-                if state.get("hypotheses"):
-                    updates = await hypothesis_update_node.execute(state)
-                    updates["current_phase"] = hypothesis_update_node.get_next_phase(state, updates)
-                    state = {**state, **updates}
-                
-            elif phase == ResearchPhase.ANALYZING.value:
-                updates = await analysis_node.execute(state)
-                updates["current_phase"] = analysis_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-            
-            # Multi-step Reasoning: Self-Reflection
-            elif phase == ResearchPhase.REFLECTING.value:
-                updates = await reflection_node.execute(state)
-                updates["current_phase"] = reflection_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-                
-            elif phase == ResearchPhase.CORRELATING.value:
-                updates = await correlation_node.execute(state)
-                updates["current_phase"] = correlation_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-            
-            # Multi-step Reasoning: Verification
-            elif phase == ResearchPhase.VERIFYING.value:
-                updates = await verification_node.execute(state)
-                updates["current_phase"] = verification_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-                
-            elif phase == ResearchPhase.SYNTHESIZING.value:
-                updates = await synthesis_node.execute(state)
-                updates["current_phase"] = synthesis_node.get_next_phase(state, updates)
-                state = {**state, **updates}
-                
-            else:
-                break
+            finally:
+                logger.set_progress_bar(None)
         
         return state
     
