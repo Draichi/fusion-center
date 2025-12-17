@@ -64,3 +64,8 @@ Thumbs.db
 
 # Telegram session (sensitive auth data)
 .telegram_session/
+
+# Dynamic data (databases, runtime data)
+data/
+*.db
+*.db-journal
