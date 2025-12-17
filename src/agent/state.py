@@ -286,6 +286,7 @@ class AgentState(TypedDict):
     
     # === Analysis ===
     correlations: list[dict[str, Any]]  # List of Correlation dicts
+    pre_computed_correlations: list[dict[str, Any]] | None  # From Event Correlation Engine
     key_insights: list[str]  # Important insights extracted
     uncertainties: list[str]  # Areas of uncertainty
     
@@ -354,6 +355,7 @@ def create_initial_state(
         
         # Analysis
         correlations=[],
+        pre_computed_correlations=None,  # From Event Correlation Engine
         key_insights=[],
         uncertainties=[],
         

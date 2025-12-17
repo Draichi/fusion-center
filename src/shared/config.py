@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Dashboard Configuration
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8000
+    
+    # Event Correlation Engine Configuration
+    ece_db_path: str = "data/ece.db"
 
     # ==========================================================================
     # Data Source API Keys
