@@ -87,6 +87,9 @@ Do NOT use data source names like "GDELT" or "IODA" - use the actual tool names 
         
         logger.success(f"Analysis complete: {len(analysis.get('key_insights', []))} insights")
         
+        # Debug: log actual insights content
+        logger.debug(f"Raw key_insights: {analysis.get('key_insights', [])}")
+        
         # Log thinking/reasoning chain
         if thinking:
             self.writer.log_reasoning(
@@ -113,9 +116,11 @@ Do NOT use data source names like "GDELT" or "IODA" - use the actual tool names 
             analysis_summary.append("[bold]Key Insights:[/bold]")
             for insight in analysis["key_insights"]:
                 if isinstance(insight, dict):
-                    analysis_summary.append(f"  • {insight.get('description', str(insight))}")
+                    text = insight.get('description', '') or str(insight)
                 else:
-                    analysis_summary.append(f"  • {insight}")
+                    text = str(insight).strip()
+                if text:  # Only add non-empty insights
+                    analysis_summary.append(f"  • {text}")
         
         if analysis.get("hypothesis_implications"):
             analysis_summary.append(f"[bold]Hypothesis Implications:[/bold]")

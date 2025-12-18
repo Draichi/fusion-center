@@ -23,16 +23,28 @@ logger = get_logger()
 class OutputWriter:
     """Handles writing agent outputs to files."""
 
-    def __init__(self, output_dir: str | None = None, session_id: str | None = None):
+    def __init__(self, output_dir: str | None = None, session_id: str | None = None, query: str | None = None):
         """
         Initialize the output writer.
 
         Args:
             output_dir: Directory for output files (default from settings)
             session_id: Unique session identifier (auto-generated if not provided)
+            query: The research query (used to name the output folder)
         """
         self.output_dir = Path(output_dir or settings.output_dir)
-        self.session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Build session_id with timestamp + sanitized query
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if query:
+            # Sanitize query for folder name: lowercase, replace spaces with _, remove special chars
+            sanitized = re.sub(r'[^\w\s-]', '', query.lower())
+            sanitized = re.sub(r'[\s-]+', '_', sanitized).strip('_')
+            # Limit to 50 chars to avoid overly long folder names
+            sanitized = sanitized[:50].rstrip('_')
+            self.session_id = session_id or f"{timestamp}_{sanitized}"
+        else:
+            self.session_id = session_id or timestamp
         
         # Create session directory
         self.session_dir = self.output_dir / self.session_id
@@ -296,406 +308,306 @@ Response:
         with open(self.reasoning_log_path, "a", encoding="utf-8") as f:
             f.write(log_entry)
 
-    def write_final_report(self, state: dict[str, Any]) -> str:
+    def write_final_report(self, state: dict[str, Any]) -> tuple[str, str]:
         """
-        Write the final research report to a Markdown file.
+        Write the final SITREP intelligence report to a Markdown file.
 
         Args:
-            state: The final agent state containing the report
+            state: The final agent state containing the SITREP report
 
         Returns:
-            Path to the written report file
+            Tuple of (report_content, file_path) - content for terminal display and path to file
         """
-        task = state.get("task", "Unknown Task")
-        executive_summary = state.get("executive_summary", "No summary available.")
-        detailed_report = state.get("detailed_report", "No detailed report available.")
-        recommendations = state.get("recommendations", [])
-        confidence_assessment = state.get("confidence_assessment", "")
-        key_insights = state.get("key_insights", [])
-        correlations = state.get("correlations", [])
-        uncertainties = state.get("uncertainties", [])
+        # Generate SITREP header
+        dtg = datetime.now().strftime("%d %b %Y").upper()
+        task = state.get("task", "Unknown Query")
+        classification = state.get("classification", "OSINT / PUBLIC")
+        sources = state.get("intelligence_sources_used", [])
         
-        # Build the markdown report
         report_lines = [
-            "# Intelligence Report",
+            "🔴 **COMPREHENSIVE OSINT SITREP – PROJECT OVERWATCH**",
             "",
-            f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"**Session ID:** {self.session_id}",
+            f"**CLASSIFICATION:** {classification}",
+            f"**DTG:** {dtg} / **QUERY:** \"{task}\"",
+            f"**INTELLIGENCE SOURCES:** {', '.join(sources) if sources else 'Multiple OSINT Sources'}",
             "",
-            "---",
-            "",
-            "## Research Task",
-            "",
-            f"> {task}",
-            "",
-            "---",
-            "",
-            "## Executive Summary",
-            "",
-            executive_summary or "*No executive summary available.*",
+            "–––",
             "",
         ]
         
-        # Key Insights - Clean and deduplicate
-        if key_insights:
-            # Clean insights: remove numbered prefixes, extract text from dicts, deduplicate
-            cleaned_insights = []
-            seen_insights = set()
-            
-            for insight in key_insights:
-                if not insight:
-                    continue
-                    
-                # Extract text from dict or string
-                if isinstance(insight, dict):
-                    insight_text = insight.get("description", str(insight))
-                else:
-                    insight_text = str(insight)
-                
-                # Remove numbered prefixes like "1. ", "2. ", etc.
-                insight_text = re.sub(r'^\d+\.\s*', '', insight_text.strip())
-                
-                # Remove common prefixes that indicate structure
-                insight_text = re.sub(r'^(Key patterns observed|Notable events|Preliminary correlations|How findings|Confidence assessment|Areas requiring):\s*', '', insight_text, flags=re.IGNORECASE)
-                
-                # Normalize and deduplicate
-                normalized = insight_text.lower().strip()
-                if normalized and normalized not in seen_insights and len(insight_text) > 10:
-                    seen_insights.add(normalized)
-                    cleaned_insights.append(insight_text)
-            
-            # Limit to most important insights (max 7)
-            if cleaned_insights:
-                report_lines.extend([
-                    "---",
-                    "",
-                    "## Key Insights",
-                    "",
-                ])
-                for i, insight in enumerate(cleaned_insights[:7], 1):
-                    report_lines.append(f"{i}. {insight}")
-                report_lines.append("")
-        
-        # Detailed Report - Validate before including
-        if detailed_report:
-            # Clean and validate detailed_report
-            detailed_report = detailed_report.strip()
-            
-            # Skip if it's just malformed JSON or empty
-            if detailed_report in ["{", "}", "{}", ""] or len(detailed_report) < 10:
-                logger.warning("⚠️ Detailed report is malformed or too short, skipping section")
-                detailed_report = None
-            
-            if detailed_report:
-                report_lines.extend([
-                    "---",
-                    "",
-                    "## Detailed Analysis",
-                    "",
-                    detailed_report,
-                    "",
-                ])
-        
-        # Correlations - Consolidate similar ones
-        if correlations:
-            # Group correlations by type and consolidate similar descriptions
-            correlations_by_type = defaultdict(list)
-            
-            for corr in correlations:
-                corr_type = corr.get("correlation_type", "unknown")
-                correlations_by_type[corr_type].append(corr)
-            
-            if correlations_by_type:
-                report_lines.extend([
-                    "---",
-                    "",
-                    "## Correlations Found",
-                    "",
-                ])
-                
-                for corr_type, corr_list in correlations_by_type.items():
-                    # Consolidate similar correlations
-                    unique_descriptions = {}
-                    all_implications = []
-                    confidences = []
-                    
-                    for corr in corr_list:
-                        description = corr.get("description", "No description")
-                        confidence = corr.get("confidence", "unknown")
-                        implications = corr.get("implications", [])
-                        
-                        # Normalize description for deduplication
-                        desc_key = description.lower().strip()[:100]  # First 100 chars
-                        
-                        if desc_key not in unique_descriptions:
-                            unique_descriptions[desc_key] = description
-                        
-                        confidences.append(confidence)
-                        all_implications.extend(implications)
-                    
-                    # Use most common confidence level
-                    most_common_conf = Counter(confidences).most_common(1)[0][0] if confidences else "unknown"
-                    
-                    # Deduplicate implications
-                    unique_implications = list(dict.fromkeys(all_implications))  # Preserves order
-                    
-                    # Only show if we have meaningful content
-                    if unique_descriptions:
-                        report_lines.extend([
-                            f"### {corr_type.title()} Correlation{'s' if len(corr_list) > 1 else ''}",
-                            "",
-                            f"**Confidence:** {most_common_conf}",
-                            "",
-                        ])
-                        
-                        # Show consolidated description(s)
-                        if len(unique_descriptions) == 1:
-                            report_lines.append(list(unique_descriptions.values())[0])
-                        else:
-                            # Multiple unique correlations of same type
-                            for desc in list(unique_descriptions.values())[:3]:  # Limit to 3
-                                report_lines.append(f"- {desc}")
-                        
-                        report_lines.append("")
-                        
-                        # Show unique implications (limit to 3)
-                        if unique_implications:
-                            report_lines.append("**Implications:**")
-                            for imp in unique_implications[:3]:
-                                report_lines.append(f"- {imp}")
-                            if len(unique_implications) > 3:
-                                report_lines.append(f"- ... and {len(unique_implications) - 3} more")
-                            report_lines.append("")
-        
-        # Recommendations
-        if recommendations:
+        # Section I - Executive Intelligence Summary
+        section_i = state.get("section_i", {})
+        if section_i or state.get("executive_summary"):
             report_lines.extend([
-                "---",
+                "## SECTION I – EXECUTIVE INTELLIGENCE SUMMARY",
                 "",
-                "## Recommendations",
+                "### A. DIRECT RESPONSE TO QUERY",
+                "",
+                section_i.get("direct_response", state.get("executive_summary", "*No response available.*")),
+                "",
+                "### B. KEY INTELLIGENCE HIGHLIGHTS",
                 "",
             ])
-            for i, rec in enumerate(recommendations, 1):
-                report_lines.append(f"{i}. {rec}")
+            
+            highlights = section_i.get("key_highlights", [])
+            if highlights:
+                for h in highlights:
+                    report_lines.append(f"• {h}")
+            else:
+                # Fallback to key_insights
+                for insight in state.get("key_insights", [])[:5]:
+                    if isinstance(insight, dict):
+                        insight = insight.get("description", str(insight))
+                    report_lines.append(f"• {insight}")
+            
             report_lines.append("")
-        
-        # Confidence Assessment
-        if confidence_assessment:
             report_lines.extend([
-                "---",
+                "### C. CONFIDENCE ASSESSMENT",
                 "",
-                "## Confidence Assessment",
+                f"**Overall Confidence:** {section_i.get('overall_confidence_percent', 75)}%",
+                f"**Intelligence Quality:** {section_i.get('intelligence_quality', 'GOOD')}",
+                f"**Query Complexity:** {section_i.get('query_complexity', 'MODERATE')}",
                 "",
-                confidence_assessment,
+                "–––",
                 "",
             ])
         
-        # Uncertainties
-        if uncertainties:
+        # Section II - Detailed Analysis
+        section_ii = state.get("section_ii", {})
+        topics = section_ii.get("topics", [])
+        if topics:
             report_lines.extend([
-                "---",
-                "",
-                "## Uncertainties & Information Gaps",
-                "",
-            ])
-            for unc in uncertainties:
-                report_lines.append(f"- {unc}")
-            report_lines.append("")
-        
-        # Multi-step Reasoning section
-        if state.get("hypotheses") or state.get("reasoning_trace") or state.get("reflection_notes"):
-            report_lines.extend([
-                "---",
-                "",
-                "## Multi-step Reasoning Process",
+                "## SECTION II – DETAILED ANALYSIS",
                 "",
             ])
             
-            # Hypotheses - Only show relevant ones (tested or high confidence)
-            if state.get("hypotheses"):
-                relevant_hypotheses = []
-                for h in state["hypotheses"]:
-                    status = h.get("status", "proposed")
-                    conf = h.get("confidence", 0)
-                    # Only include if: tested (not just proposed) OR high confidence (>0.5)
-                    if status != "proposed" or conf > 0.5:
-                        relevant_hypotheses.append(h)
+            for i, topic in enumerate(topics, 1):
+                report_lines.extend([
+                    f"### {i}. {topic.get('title', f'Topic {i}')}",
+                    "",
+                    "**Current Situation:**",
+                    topic.get("current_situation", "*No situation assessment available.*"),
+                    "",
+                ])
                 
-                if relevant_hypotheses:
-                    report_lines.extend([
-                        "### Hypotheses Tested",
-                        "",
-                    ])
-                    for h in relevant_hypotheses:
-                        status_emoji = {
-                            "supported": "✅",
-                            "refuted": "❌",
-                            "investigating": "🔍",
-                            "inconclusive": "❓",
-                            "proposed": "📝",
-                        }.get(h.get("status", "proposed"), "📝")
-                        conf = h.get("confidence", 0)
-                        report_lines.append(f"- {status_emoji} **{h.get('id', 'H?')}**: {h.get('statement', 'No statement')} (confidence: {conf:.0%})")
+                if topic.get("key_developments"):
+                    report_lines.append("**Key Developments:**")
+                    for dev in topic["key_developments"]:
+                        report_lines.append(f"• {dev}")
+                    report_lines.append("")
+                
+                if topic.get("probability_assessments"):
+                    report_lines.append("**Probability Forecasts:**")
+                    for prob in topic["probability_assessments"]:
+                        scenario = prob.get("scenario", "Unknown")
+                        pct = prob.get("probability_percent", 50)
+                        timeframe = prob.get("timeframe", "Near-term")
+                        report_lines.append(f"• {scenario}: **{pct}%** ({timeframe})")
+                    report_lines.append("")
+                
+                if topic.get("evidence_citations"):
+                    report_lines.append("**Evidence:**")
+                    for cite in topic["evidence_citations"][:3]:
+                        report_lines.append(f"• {cite}")
                     report_lines.append("")
             
-            # Reflection summary
-            if state.get("reflection_notes"):
-                critical = [n for n in state["reflection_notes"] if n.get("severity") == "critical"]
-                warnings = [n for n in state["reflection_notes"] if n.get("severity") == "warning"]
-                if critical or warnings:
-                    report_lines.extend([
-                        "### Self-Reflection Notes",
-                        "",
-                    ])
-                    for note in critical[:3]:
-                        report_lines.append(f"- 🚨 **Critical**: {note.get('content', 'No content')}")
-                    for note in warnings[:3]:
-                        report_lines.append(f"- ⚠️ **Warning**: {note.get('content', 'No content')}")
-                    report_lines.append("")
+            if section_ii.get("cross_topic_connections"):
+                report_lines.extend([
+                    "**Cross-Topic Connections:**",
+                    section_ii["cross_topic_connections"],
+                    "",
+                ])
             
-            # Reasoning depth
+            report_lines.extend(["–––", ""])
+        
+        # Section III - Supporting Intelligence Analysis
+        section_iii = state.get("section_iii", {})
+        report_lines.extend([
+            "## SECTION III – SUPPORTING INTELLIGENCE ANALYSIS",
+            "",
+            "### A. SATELLITE INTELLIGENCE (NASA FIRMS)",
+            section_iii.get("satellite_intel", "*No satellite data collected.*"),
+            "",
+            "### B. NEWS INTELLIGENCE (GDELT/RSS)",
+            section_iii.get("news_intel", "*No news data collected.*"),
+            "",
+            "### C. CYBER INTELLIGENCE (IODA/OTX)",
+            section_iii.get("cyber_intel", "*No cyber intelligence collected.*"),
+            "",
+            "### D. SOCIAL INTELLIGENCE (Telegram)",
+            section_iii.get("social_intel", "*No social media data collected.*"),
+            "",
+        ])
+        
+        if section_iii.get("cross_source_validation"):
             report_lines.extend([
-                "### Reasoning Statistics",
-                "",
-                f"- **Reasoning Depth:** {state.get('reasoning_depth', 0)} steps",
-                f"- **Reflection Iterations:** {state.get('reflection_iterations', 0)}",
-                f"- **Verified Items:** {len(state.get('verification_results', []))}",
+                "### E. CROSS-SOURCE VALIDATION",
+                section_iii["cross_source_validation"],
                 "",
             ])
         
-        # Sources Used section
-        executed_queries = state.get("executed_queries", [])
-        findings = state.get("findings", [])
+        if section_iii.get("contradictions"):
+            report_lines.append("**Contradictions Found:**")
+            for c in section_iii["contradictions"]:
+                report_lines.append(f"• {c}")
+            report_lines.append("")
         
-        if executed_queries or findings:
-            report_lines.extend([
-                "---",
-                "",
-                "## Sources Used",
-                "",
-            ])
-            
-            # Group queries by tool/source
-            sources_summary = {}
-            for query in executed_queries:
-                tool = query.get("tool", "unknown")
-                status = query.get("status", "unknown")
-                
-                if tool not in sources_summary:
-                    sources_summary[tool] = {"success": 0, "failed": 0, "queries": []}
-                
+        if section_iii.get("intelligence_gaps"):
+            report_lines.append("**Intelligence Gaps:**")
+            for g in section_iii["intelligence_gaps"]:
+                report_lines.append(f"• {g}")
+            report_lines.append("")
+        
+        report_lines.extend(["–––", ""])
+        
+        # Section IV - Actionable Intelligence & Recommendations
+        section_iv = state.get("section_iv", {})
+        recommendations = state.get("recommendations", [])
+        report_lines.extend([
+            "## SECTION IV – ACTIONABLE INTELLIGENCE & RECOMMENDATIONS",
+            "",
+            "### A. IMMEDIATE ACTIONS",
+        ])
+        
+        immediate = section_iv.get("immediate_actions", recommendations[:3] if recommendations else [])
+        if immediate:
+            for action in immediate:
+                report_lines.append(f"• {action}")
+        else:
+            report_lines.append("• Continue monitoring situation")
+        report_lines.append("")
+        
+        report_lines.append("### B. MONITORING INDICATORS")
+        monitoring = section_iv.get("monitoring_indicators", [])
+        if monitoring:
+            for ind in monitoring:
+                report_lines.append(f"• {ind}")
+        else:
+            report_lines.append("• No specific indicators identified")
+        report_lines.append("")
+        
+        report_lines.append("### C. FOLLOW-UP COLLECTION")
+        followup = section_iv.get("follow_up_collection", [])
+        if followup:
+            for f in followup:
+                report_lines.append(f"• {f}")
+        else:
+            report_lines.append("• Forward collection required to address intelligence gaps")
+        report_lines.extend(["", "–––", ""])
+        
+        # Section V - Intelligence Assessment Metadata
+        section_v = state.get("section_v", {})
+        report_lines.extend([
+            "## SECTION V – INTELLIGENCE ASSESSMENT METADATA",
+            "",
+            "### A. SOURCE RELIABILITY MATRIX",
+            "",
+            "| Source | Reliability | Credibility | Timeliness | Grade |",
+            "|--------|-------------|-------------|------------|-------|",
+        ])
+        
+        # Build reliability matrix
+        reliability_matrix = section_v.get("source_reliability_matrix", [])
+        if reliability_matrix:
+            for entry in reliability_matrix:
+                name = entry.get("source_name", "Unknown")
+                rel = entry.get("reliability", "B")
+                cred = entry.get("credibility", "2")
+                time = entry.get("timeliness", "Current")
+                grade = entry.get("grade", f"{rel}-{cred}")
+                report_lines.append(f"| {name} | {rel} | {cred} | {time} | {grade} |")
+        else:
+            # Generate default matrix from executed queries
+            tool_sources = {}
+            for q in state.get("executed_queries", []):
+                tool = q.get("tool", "unknown")
+                status = q.get("status", "unknown")
+                if tool not in tool_sources:
+                    tool_sources[tool] = {"success": 0, "failed": 0}
                 if status == "success":
-                    sources_summary[tool]["success"] += 1
+                    tool_sources[tool]["success"] += 1
                 else:
-                    sources_summary[tool]["failed"] += 1
-                
-                sources_summary[tool]["queries"].append(query)
+                    tool_sources[tool]["failed"] += 1
             
-            # Map tool names to human-readable source names
             tool_to_source = {
-                "search_news": "GDELT News Database",
-                "detect_thermal_anomalies": "NASA FIRMS Satellite Data",
-                "check_connectivity": "IODA Internet Monitoring",
-                "check_traffic_metrics": "Cloudflare Radar",
-                "check_ioc": "AlienVault OTX IoC Lookup",
-                "search_threats": "AlienVault OTX Threat Pulses",
-                "get_threat_pulse": "AlienVault OTX Pulse Details",
+                "search_news": ("GDELT News", "B", "2"),
+                "fetch_rss_news": ("RSS Feeds", "B", "2"),
+                "detect_thermal_anomalies": ("NASA FIRMS", "A", "2"),
+                "check_connectivity": ("IODA", "B", "2"),
+                "check_traffic_metrics": ("Cloudflare", "B", "2"),
+                "search_telegram": ("Telegram", "C", "3"),
+                "check_ioc": ("AlienVault OTX", "B", "2"),
+                "search_threats": ("AlienVault OTX", "B", "2"),
             }
             
-            for tool, info in sources_summary.items():
-                source_name = tool_to_source.get(tool, tool)
-                success_count = info["success"]
-                failed_count = info["failed"]
-                
-                # Only show sources with successful queries or if they're important
-                if success_count == 0 and failed_count > 0:
-                    # Skip sources that only failed, unless explicitly needed
-                    continue
-                
-                status_icon = "✅" if failed_count == 0 else "⚠️" if success_count > 0 else "❌"
-                
-                report_lines.append(f"### {status_icon} {source_name}")
-                report_lines.append("")
-                
-                if success_count > 0:
-                    report_lines.append(f"- **Successful queries:** {success_count}")
-                    if failed_count > 0:
-                        report_lines.append(f"- **Failed queries:** {failed_count}")
-                else:
-                    report_lines.append(f"- **Queries:** {failed_count} (all failed)")
-                
-                # Show only successful query details (limit to 3)
-                successful_queries = [q for q in info["queries"] if q.get("status") == "success"]
-                if successful_queries:
-                    report_lines.append("")
-                    for q in successful_queries[:3]:
-                        args = q.get("args", {})
-                        
-                        # Format query args nicely
-                        if tool == "search_news":
-                            keywords = args.get("keywords", "N/A")
-                            country = args.get("source_country", "Global")
-                            report_lines.append(f"  - Keywords: `{keywords[:50]}{'...' if len(keywords) > 50 else ''}` | Source: {country}")
-                        elif tool == "detect_thermal_anomalies":
-                            lat = args.get("latitude", "?")
-                            lon = args.get("longitude", "?")
-                            radius = args.get("radius_km", "?")
-                            report_lines.append(f"  - Location: ({lat}, {lon}) | Radius: {radius}km")
-                        elif tool == "check_connectivity":
-                            region = args.get("region_name") or args.get("country_code", "N/A")
-                            report_lines.append(f"  - Region: {region}")
-                        elif tool == "check_traffic_metrics":
-                            country = args.get("country_code", "N/A")
-                            metric = args.get("metric", "traffic")
-                            report_lines.append(f"  - Country: {country} | Metric: {metric}")
-                        else:
-                            # Simplified format for other tools
-                            key_args = {k: v for k, v in args.items() if k in ["query", "indicator", "source"]}
-                            if key_args:
-                                report_lines.append(f"  - {key_args}")
-                    
-                    if len(successful_queries) > 3:
-                        report_lines.append(f"  - ... and {len(successful_queries) - 3} more successful queries")
-                
-                report_lines.append("")
-            
-            # Add news article sources if available
-            news_sources = set()
-            for finding in findings:
-                if finding.get("source_type") == "news":
-                    domain = finding.get("source") or finding.get("content", {}).get("domain")
-                    if domain:
-                        news_sources.add(domain)
-            
-            if news_sources:
-                report_lines.extend([
-                    "### 📰 News Sources Cited",
-                    "",
-                ])
-                for source in sorted(news_sources)[:20]:  # Limit to 20 sources
-                    report_lines.append(f"- {source}")
-                if len(news_sources) > 20:
-                    report_lines.append(f"- ... and {len(news_sources) - 20} more sources")
-                report_lines.append("")
+            seen_sources = set()
+            for tool, counts in tool_sources.items():
+                if tool in tool_to_source:
+                    name, rel, cred = tool_to_source[tool]
+                    if name not in seen_sources:
+                        seen_sources.add(name)
+                        grade = f"{rel}-{cred}"
+                        report_lines.append(f"| {name} | {rel} | {cred} | Current | {grade} |")
         
-        # Metadata footer
         report_lines.extend([
-            "---",
             "",
-            "## Research Metadata",
+            "### B. ANALYTICAL CONFIDENCE",
+            section_v.get("analytical_confidence", state.get("confidence_assessment", "Moderate confidence based on available sources.")),
             "",
-            f"- **Iterations:** {state.get('iteration', 0)}",
-            f"- **Findings Collected:** {len(state.get('findings', []))}",
-            f"- **Queries Executed:** {len(state.get('executed_queries', []))}",
-            f"- **Task Complexity:** {state.get('task_complexity', 'N/A')}",
-            f"- **Sub-tasks:** {len(state.get('sub_tasks', []))}",
-            f"- **Started:** {state.get('started_at', 'N/A')}",
-            f"- **Completed:** {state.get('last_updated', 'N/A')}",
+        ])
+        
+        if section_v.get("key_assumptions"):
+            report_lines.append("**Key Assumptions:**")
+            for a in section_v["key_assumptions"]:
+                report_lines.append(f"• {a}")
+            report_lines.append("")
+        
+        if section_v.get("alternative_scenarios"):
+            report_lines.append("**Alternative Scenarios:**")
+            for s in section_v["alternative_scenarios"]:
+                report_lines.append(f"• {s}")
+            report_lines.append("")
+        
+        report_lines.extend([
+            "### C. INTELLIGENCE FRESHNESS",
+            section_v.get("data_freshness", f"Data collected: {datetime.now().strftime('%Y-%m-%d')}"),
             "",
-            "---",
+            "–––",
             "",
-            f"*Report generated by Project Overwatch with Multi-step Reasoning*",
-            f"*Reasoning log available at: `{self.reasoning_log_path.name}`*",
+        ])
+        
+        # Section VI - Forward Intelligence Requirements
+        section_vi = state.get("section_vi", {})
+        report_lines.extend([
+            "## SECTION VI – FORWARD INTELLIGENCE REQUIREMENTS",
+            "",
+            "### A. PRIORITY COLLECTION",
+        ])
+        
+        priority = section_vi.get("priority_collection", [])
+        if priority:
+            for p in priority:
+                report_lines.append(f"1. {p}")
+        else:
+            report_lines.append("• Collect additional temporal data to identify trends")
+        report_lines.append("")
+        
+        report_lines.append("### B. MONITORING & EARLY WARNING")
+        triggers = section_vi.get("early_warning_triggers", [])
+        if triggers:
+            for t in triggers:
+                report_lines.append(f"• {t}")
+        else:
+            report_lines.append("• Monitor for significant changes in assessed situation")
+        report_lines.extend(["", "–––", ""])
+        
+        # Footer
+        report_lines.extend([
+            f"**CLASSIFICATION:** {classification}",
+            f"**ANALYST:** Project Overwatch OSINT Intelligence System",
+            f"**SESSION:** {self.session_id}",
+            "",
+            "〔END SITREP〕",
         ])
         
         # Write the report
@@ -703,7 +615,7 @@ Response:
         with open(self.report_path, "w", encoding="utf-8") as f:
             f.write(report_content)
         
-        return str(self.report_path)
+        return report_content, str(self.report_path)
 
     def save_state(self, state: dict[str, Any]) -> str:
         """
@@ -798,13 +710,14 @@ Verified Correlations: {len(state.get('verified_correlations', []))}
             f.write(completion_entry)
         
         # Write final report
-        report_path = self.write_final_report(state)
+        report_content, report_path = self.write_final_report(state)
         
         # Save state JSON
         state_path = self.save_state(state)
         
         return {
             "report": report_path,
+            "report_content": report_content,
             "reasoning_log": str(self.reasoning_log_path),
             "state": state_path,
             "session_dir": str(self.session_dir),
@@ -815,20 +728,21 @@ Verified Correlations: {len(state.get('verified_correlations', []))}
 _current_writer: OutputWriter | None = None
 
 
-def get_output_writer(session_id: str | None = None) -> OutputWriter:
+def get_output_writer(session_id: str | None = None, query: str | None = None) -> OutputWriter:
     """
     Get or create the output writer for the current session.
 
     Args:
         session_id: Optional session ID (creates new writer if provided)
+        query: Optional research query (used to name the output folder)
 
     Returns:
         OutputWriter instance
     """
     global _current_writer
     
-    if session_id is not None or _current_writer is None:
-        _current_writer = OutputWriter(session_id=session_id)
+    if session_id is not None or query is not None or _current_writer is None:
+        _current_writer = OutputWriter(session_id=session_id, query=query)
     
     return _current_writer
 

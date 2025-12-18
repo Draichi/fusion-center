@@ -263,12 +263,80 @@ class MCPToolExecutor:
             result = await self.session.call_tool(resolved_name, arguments=arguments)
             
             # Parse the result content
+            parsed_result = None
             if result.content:
                 for content_item in result.content:
                     if hasattr(content_item, 'text'):
-                        return json.loads(content_item.text)
+                        parsed_result = json.loads(content_item.text)
+                        break
             
-            return {"status": "success", "data": str(result)}
+            if parsed_result is None:
+                parsed_result = {"status": "success", "data": str(result)}
+            
+            # Log response details for debugging
+            status = parsed_result.get("status", "unknown")
+            data_source = parsed_result.get("data_source", "N/A")
+            
+            # Count data items based on tool type
+            data_count = 0
+            data_preview = ""
+            
+            if "article_count" in parsed_result:
+                data_count = parsed_result["article_count"]
+                articles = parsed_result.get("articles", [])
+                if articles:
+                    first_article = articles[0] if isinstance(articles[0], dict) else {}
+                    data_preview = f"First article: {first_article.get('title', 'N/A')[:60]}..."
+            elif "anomaly_count" in parsed_result:
+                data_count = parsed_result["anomaly_count"]
+                anomalies = parsed_result.get("anomalies", [])
+                if anomalies:
+                    first = anomalies[0] if isinstance(anomalies[0], dict) else {}
+                    data_preview = f"First anomaly: ({first.get('latitude', '?')}, {first.get('longitude', '?')}) conf={first.get('confidence', '?')}"
+            elif "current_status" in parsed_result:
+                cs = parsed_result.get("current_status", {})
+                data_preview = f"Status: {cs.get('status', 'N/A')}, BGP: {cs.get('bgp_visibility', 'N/A')}%"
+                data_count = len(parsed_result.get("recent_outages", []))
+            elif "outage_count" in parsed_result:
+                data_count = parsed_result["outage_count"]
+                outages = parsed_result.get("outages", [])
+                if outages:
+                    first = outages[0] if isinstance(outages[0], dict) else {}
+                    data_preview = f"First outage: {first.get('location_name', 'N/A')} ({first.get('severity', '?')})"
+            elif "pulse_count" in parsed_result:
+                data_count = parsed_result["pulse_count"]
+                pulses = parsed_result.get("pulses", [])
+                if pulses:
+                    first = pulses[0] if isinstance(pulses[0], dict) else {}
+                    data_preview = f"First pulse: {first.get('name', 'N/A')[:60]}..."
+            elif "indicator_info" in parsed_result:
+                info = parsed_result.get("indicator_info", {})
+                data_preview = f"Indicator: {info.get('indicator', '?')} - pulses: {info.get('pulse_count', 0)}"
+                data_count = info.get("pulse_count", 0)
+            elif "message_count" in parsed_result:
+                data_count = parsed_result["message_count"]
+                messages = parsed_result.get("messages", [])
+                if messages:
+                    first = messages[0] if isinstance(messages[0], dict) else {}
+                    data_preview = f"First msg: @{first.get('channel_username', '?')} - {first.get('text', '')[:50]}..."
+            elif "metrics" in parsed_result:
+                metrics = parsed_result.get("metrics", {})
+                data_preview = f"Metrics keys: {list(metrics.keys())[:5]}"
+                data_count = len(metrics)
+            
+            # Log the response summary
+            logger.info(
+                f"[bold cyan]📥 Response from {resolved_name}:[/bold cyan] "
+                f"status={status}, data_source={data_source}, items={data_count}"
+            )
+            if data_preview:
+                logger.debug(f"   Preview: {data_preview}")
+            
+            # Log error messages if present
+            if parsed_result.get("error_message"):
+                logger.warning(f"   ⚠️ Tool warning: {parsed_result['error_message'][:100]}...")
+            
+            return parsed_result
             
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")

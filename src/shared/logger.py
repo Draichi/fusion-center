@@ -40,6 +40,25 @@ OVERWATCH_THEME = Theme(
 console = Console(theme=OVERWATCH_THEME, stderr=True)
 
 
+def _configure_third_party_loggers(log_level: str) -> None:
+    """Configure third-party loggers to respect the app's log level."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+
+    third_party_loggers = [
+        "langchain",
+        "langchain_core",
+        "langchain_openai",
+        "langchain_google_genai",
+        "langchain_ollama",
+        "langgraph",
+        "httpx",
+        "httpcore",
+    ]
+
+    for logger_name in third_party_loggers:
+        logging.getLogger(logger_name).setLevel(level)
+
+
 class OverwatchLogger:
     """Custom logger with Rich formatting for Project Overwatch."""
 
@@ -67,6 +86,9 @@ class OverwatchLogger:
             ],
         )
         self._logger = logging.getLogger(name)
+
+        # Configure third-party loggers to respect LOG_LEVEL
+        _configure_third_party_loggers(log_level)
         
     def set_progress_bar(self, bar: Any) -> None:
         """Set the active progress bar instance."""

@@ -1,5 +1,5 @@
 """
-Synthesis Node - Synthesizes all findings into final intelligence report.
+Synthesis Node - Synthesizes all findings into final SITREP intelligence report.
 """
 
 import json
@@ -7,15 +7,15 @@ from typing import Any
 
 from src.agent.nodes.base import BaseNode
 from src.agent.state import AgentState, ResearchPhase
-from src.agent.schemas import SynthesisOutput
-from src.agent.prompts import ENHANCED_SYNTHESIZER_PROMPT
+from src.agent.schemas import SITREPOutput
+from src.agent.prompts import SITREP_SYNTHESIZER_PROMPT
 from src.shared.logger import get_logger
 
 logger = get_logger()
 
 
 class SynthesisNode(BaseNode):
-    """Node that synthesizes all findings into a final intelligence report."""
+    """Node that synthesizes all findings into a final SITREP intelligence report."""
     
     def get_phase_name(self) -> str:
         return "synthesizing"
@@ -66,46 +66,72 @@ class SynthesisNode(BaseNode):
                 "tool": q.get("tool"),
                 "args": q.get("args"),
                 "timestamp": q.get("timestamp"),
+                "status": q.get("status"),
             })
         
+        # Categorize sources used
+        sources_used = set()
+        for q in state.get("executed_queries", []):
+            tool = q.get("tool", "")
+            if "news" in tool.lower() or "rss" in tool.lower() or "gdelt" in tool.lower():
+                sources_used.add("GDELT News Database")
+            elif "thermal" in tool.lower() or "firms" in tool.lower() or "satellite" in tool.lower():
+                sources_used.add("NASA FIRMS Satellite Data")
+            elif "connectivity" in tool.lower() or "ioda" in tool.lower() or "outage" in tool.lower():
+                sources_used.add("IODA Internet Monitoring")
+            elif "traffic" in tool.lower() or "cloudflare" in tool.lower():
+                sources_used.add("Cloudflare Radar")
+            elif "telegram" in tool.lower():
+                sources_used.add("Telegram OSINT Channels")
+            elif "ioc" in tool.lower() or "threat" in tool.lower() or "otx" in tool.lower() or "pulse" in tool.lower():
+                sources_used.add("AlienVault OTX Threat Intelligence")
+        
         return f"""
-{ENHANCED_SYNTHESIZER_PROMPT}
+{SITREP_SYNTHESIZER_PROMPT}
 
-## Original Task
+## ORIGINAL QUERY
 {state["task"]}
 
-## Research Plan
+## INTELLIGENCE SOURCES AVAILABLE
+{', '.join(sources_used) if sources_used else 'Multiple OSINT sources'}
+
+## RESEARCH PLAN
 {json.dumps(state.get("research_plan", {}), indent=2)}
 {hypotheses_summary}
 
-## Verified Key Insights
+## VERIFIED KEY INSIGHTS
 {json.dumps(insights_to_use, indent=2)}
 
-## Verified Correlations
+## VERIFIED CORRELATIONS
 {json.dumps(correlations_to_use, indent=2)}
 
-## Uncertainties
+## UNCERTAINTIES & INTELLIGENCE GAPS
 {json.dumps(state.get("uncertainties", []), indent=2)}
 {reflection_summary}
 
-## Reasoning Process Summary
+## REASONING PROCESS SUMMARY
 - Reasoning depth: {state.get("reasoning_depth", 0)} steps
 - Reflection iterations: {state.get("reflection_iterations", 0)}
 - Verification results: {len(state.get("verification_results", []))} items verified
 
-## Raw Findings (Sources for Citation)
+## RAW FINDINGS (Sources for Citation)
 These are the actual data points collected from tools. CITE THESE in your report.
 {json.dumps(findings_for_citation, indent=2)}
 
-## Queries Executed
+## QUERIES EXECUTED
 {json.dumps(executed_queries_summary, indent=2)}
 
-Create a comprehensive intelligence report as JSON. 
-IMPORTANT: The detailed_report MUST include inline citations for every claim and a "## Sources" section at the end.
+Create a comprehensive SITREP intelligence report as JSON following the schema exactly.
+IMPORTANT: 
+- Include ALL 6 sections (section_i through section_vi)
+- Cite sources for every claim
+- Use intelligence community language
+- Include probability assessments where appropriate
+- Complete the source reliability matrix in section_v
 """
     
     def get_output_schema(self) -> type:
-        return SynthesisOutput
+        return SITREPOutput
     
     def process_output(
         self,
@@ -113,78 +139,49 @@ IMPORTANT: The detailed_report MUST include inline citations for every claim and
         output: dict[str, Any],
         thinking: str = "",
     ) -> dict[str, Any]:
+        """Process the SITREP output and prepare state update."""
         report = output
         
-        logger.success("Final report synthesized")
+        logger.success("SITREP intelligence report synthesized")
         
-        # Validate and clean detailed_report
-        detailed_report = report.get("detailed_report", "")
-        if not detailed_report or detailed_report.strip() in ["{", "}", "{}", ""]:
-            logger.warning("⚠️ Detailed report is empty or malformed, generating fallback")
-            # Generate fallback from insights and correlations
-            insights = state.get("verified_insights") or state.get("key_insights", [])
-            correlations = state.get("verified_correlations") or state.get("correlations", [])
-            
-            fallback_parts = []
-            if insights:
-                fallback_parts.append("## Key Findings\n")
-                for i, insight in enumerate(insights[:5], 1):
-                    if isinstance(insight, dict):
-                        insight_text = insight.get("description", str(insight))
-                    else:
-                        insight_text = str(insight)
-                    fallback_parts.append(f"{i}. {insight_text}\n")
-                fallback_parts.append("\n")
-            
-            if correlations:
-                fallback_parts.append("## Correlations\n")
-                for corr in correlations[:3]:
-                    corr_type = corr.get("correlation_type", "unknown")
-                    desc = corr.get("description", "No description")
-                    fallback_parts.append(f"**{corr_type.title()}**: {desc}\n")
-                fallback_parts.append("\n")
-            
-            if not fallback_parts:
-                detailed_report = "*No detailed analysis available. Please refer to the executive summary and key insights above.*"
-            else:
-                detailed_report = "".join(fallback_parts)
-                detailed_report += "\n*Note: This analysis was auto-generated from verified insights due to incomplete LLM response.*"
-        else:
-            # Clean up common malformed patterns
-            detailed_report = detailed_report.strip()
-            # Remove standalone JSON braces
-            if detailed_report.startswith("{") and not detailed_report.startswith("{"):
-                # Check if it's just a brace
-                if detailed_report == "{" or detailed_report.startswith("{\n") and len(detailed_report) < 10:
-                    logger.warning("⚠️ Detailed report appears to be just a JSON brace, using fallback")
-                    detailed_report = "*No detailed analysis available. Please refer to the executive summary and key insights above.*"
+        # Extract key fields for state update
+        section_i = report.get("section_i", {})
+        section_ii = report.get("section_ii", {})
+        section_iii = report.get("section_iii", {})
+        section_iv = report.get("section_iv", {})
+        section_v = report.get("section_v", {})
+        section_vi = report.get("section_vi", {})
         
-        # Log the executive summary
-        if report.get("executive_summary"):
-            logger.panel(
-                report["executive_summary"],
-                title="📊 Executive Summary",
-                style="green"
-            )
+        # Build executive summary from Section I
+        direct_response = section_i.get("direct_response", "")
+        confidence = section_i.get("overall_confidence_percent", 75)
         
-        # Log recommendations
-        if report.get("recommendations"):
-            rec_lines = ["[bold]Recommendations:[/bold]"]
-            for rec in report["recommendations"]:
-                rec_lines.append(f"  • {rec}")
-            logger.panel("\n".join(rec_lines), title="💡 Recommendations", style="cyan")
+        # Build recommendations from Section IV
+        recommendations = (
+            section_iv.get("immediate_actions", []) +
+            section_iv.get("monitoring_indicators", [])[:2]
+        )
         
-        # Log confidence assessment
-        if report.get("confidence_assessment"):
-            logger.thinking(f"Confidence: {report['confidence_assessment']}")
-        
+        # Store the full SITREP report for output writer
         return {
-            "executive_summary": report.get("executive_summary"),
-            "detailed_report": detailed_report,
-            "recommendations": report.get("recommendations", []),
-            "confidence_assessment": report.get("confidence_assessment"),
+            # Legacy fields for compatibility
+            "executive_summary": direct_response,
+            "detailed_report": "",  # Will be generated by output writer
+            "recommendations": recommendations,
+            "confidence_assessment": f"{confidence}% - {section_i.get('intelligence_quality', 'GOOD')} quality",
+            
+            # New SITREP fields
+            "sitrep_output": report,
+            "classification": report.get("classification", "OSINT / PUBLIC"),
+            "query_summary": report.get("query_summary", state.get("task", "")),
+            "intelligence_sources_used": report.get("intelligence_sources_used", []),
+            "section_i": section_i,
+            "section_ii": section_ii,
+            "section_iii": section_iii,
+            "section_iv": section_iv,
+            "section_v": section_v,
+            "section_vi": section_vi,
         }
     
     def get_next_phase(self, state: AgentState, output: dict[str, Any]) -> str:
         return ResearchPhase.COMPLETE.value
-

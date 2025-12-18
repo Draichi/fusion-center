@@ -82,6 +82,30 @@ def _log_tool_result_summary(tool_name: str, result: dict[str, Any]) -> None:
             for p in pulses[:5]:
                 summary_lines.append(f"  • {p.get('name', 'Unknown')}")
     
+    elif tool_name == "check_traffic_metrics":
+        metrics = result.get("metrics", {})
+        annotations = metrics.get("meta", {}).get("confidenceInfo", {}).get("annotations", [])
+        summary_lines.append(f"[bold]Cloudflare Radar metrics for {result.get('country', 'unknown')}[/bold]")
+        summary = metrics.get("summary_0", {})
+        if summary:
+            summary_lines.append(f"  • Desktop: {summary.get('desktop', 'N/A')}%, Mobile: {summary.get('mobile', 'N/A')}%")
+        if annotations:
+            outage_count = sum(1 for a in annotations if a.get("eventType") == "OUTAGE")
+            if outage_count:
+                summary_lines.append(f"  • [bold red]⚠ {outage_count} outage event(s) detected[/bold red]")
+                for a in annotations[:2]:
+                    if a.get("eventType") == "OUTAGE":
+                        summary_lines.append(f"    → {a.get('description', 'No description')[:80]}...")
+    
+    elif tool_name == "search_telegram":
+        messages = result.get("messages", [])
+        if messages:
+            summary_lines.append(f"[bold]Found {len(messages)} Telegram messages[/bold]")
+            for msg in messages[:3]:
+                channel = msg.get("channel_username", "unknown")
+                text_preview = msg.get("text", "")[:60]
+                summary_lines.append(f"  • @{channel}: {text_preview}...")
+    
     if summary_lines:
         logger.panel("\n".join(summary_lines), title=f"📥 {tool_name} Results", style="dim cyan")
 
@@ -171,6 +195,7 @@ def _extract_findings(
             })
         
         for outage in outages:
+            metrics = outage.get("metrics", {})
             findings.append({
                 "source": "IODA",
                 "source_type": IntelligenceType.CYBER.value,
@@ -179,6 +204,8 @@ def _extract_findings(
                     "region": outage.get("region"),
                     "severity": outage.get("severity"),
                     "start_time": outage.get("start_time"),
+                    "data_source": outage.get("data_source"),
+                    "degradation_ratio": metrics.get("ratio"),
                 },
                 "relevance_score": 0.9,
                 "confidence": "high",
@@ -239,6 +266,80 @@ def _extract_findings(
                 },
                 "relevance_score": 0.8,
                 "confidence": "medium",
+            })
+    
+    elif tool_name == "check_traffic_metrics":
+        # Cloudflare Radar data
+        metrics = result.get("metrics", {})
+        meta = metrics.get("meta", {})
+        annotations = meta.get("confidenceInfo", {}).get("annotations", [])
+        
+        # Extract traffic summary
+        summary = metrics.get("summary_0", {})
+        if summary:
+            findings.append({
+                "source": "Cloudflare Radar",
+                "source_type": IntelligenceType.CYBER.value,
+                "timestamp": timestamp,
+                "content": {
+                    "country": result.get("country"),
+                    "metric_type": result.get("metric_type"),
+                    "desktop_traffic": summary.get("desktop"),
+                    "mobile_traffic": summary.get("mobile"),
+                },
+                "relevance_score": 0.7,
+                "confidence": "high",
+            })
+        
+        # Extract outage annotations (very valuable!)
+        for annotation in annotations:
+            if annotation.get("eventType") == "OUTAGE":
+                findings.append({
+                    "source": "Cloudflare Radar",
+                    "source_type": IntelligenceType.CYBER.value,
+                    "timestamp": timestamp,
+                    "content": {
+                        "event_type": annotation.get("eventType"),
+                        "description": annotation.get("description"),
+                        "start_date": annotation.get("startDate"),
+                        "end_date": annotation.get("endDate"),
+                        "linked_url": annotation.get("linkedUrl"),
+                    },
+                    "relevance_score": 0.95,
+                    "confidence": "high",
+                })
+    
+    elif tool_name == "search_telegram":
+        # Telegram OSINT messages
+        messages = result.get("messages", [])
+        for msg in messages:
+            # Calculate relevance based on views (more views = more relevant)
+            views = msg.get("views") or 0
+            if views > 10000:
+                relevance = 0.95
+                confidence = "high"
+            elif views > 1000:
+                relevance = 0.85
+                confidence = "medium"
+            else:
+                relevance = 0.7
+                confidence = "low"
+            
+            findings.append({
+                "source": f"Telegram @{msg.get('channel_username', 'unknown')}",
+                "source_type": IntelligenceType.SOCIAL.value,
+                "timestamp": timestamp,
+                "content": {
+                    "channel": msg.get("channel_name"),
+                    "channel_username": msg.get("channel_username"),
+                    "text": msg.get("text", "")[:500],  # Truncate long messages
+                    "message_date": msg.get("date"),
+                    "views": views,
+                    "url": msg.get("url"),
+                    "has_media": msg.get("has_media", False),
+                },
+                "relevance_score": relevance,
+                "confidence": confidence,
             })
     
     return findings

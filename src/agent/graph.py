@@ -346,9 +346,9 @@ class DeepResearchAgent:
         log_startup_banner("agent")
         logger.agent(f"Starting deep research: [bold]{task}[/bold]")
         
-        # Initialize output writer for this session
+        # Initialize output writer for this session (with query for folder naming)
         reset_output_writer()
-        output_writer = get_output_writer()
+        output_writer = get_output_writer(query=task)
         
         # Create initial state
         initial_state = create_initial_state(
@@ -418,8 +418,9 @@ class DeepResearchAgent:
                     if settings.save_report or settings.save_reasoning_log:
                         output_paths = output_writer.finalize(final_state)
                         logger.success(f"Report saved to: [bold]{output_paths['report']}[/bold]")
-                        logger.success(f"Reasoning log saved to: [bold]{output_paths['reasoning_log']}[/bold]")
                         final_state["output_paths"] = output_paths
+                        # Add report_content to state for terminal display
+                        final_state["report_content"] = output_paths.get("report_content", "")
                     
                     return final_state
                     

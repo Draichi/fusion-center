@@ -48,6 +48,7 @@ class IntelligenceType(str, Enum):
     SATELLITE = "satellite"
     CYBER = "cyber"
     THREAT_INTEL = "threat_intel"
+    SOCIAL = "social"  # Telegram, social media
     COMBINED = "combined"
 
 

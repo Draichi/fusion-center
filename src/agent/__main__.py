@@ -120,72 +120,48 @@ def print_providers() -> None:
 
 
 def print_report(state: dict) -> None:
-    """Print a formatted research report."""
-    logger.divider("Research Complete")
+    """Print the SITREP intelligence report using Rich Markdown."""
+    from rich.console import Console
+    from rich.markdown import Markdown
     
-    # Executive Summary
-    if state.get("executive_summary"):
-        logger.panel(
-            state["executive_summary"],
-            title="📋 Executive Summary",
-            style="green",
-        )
+    console = Console()
     
-    # Statistics
-    stats = f"""
-**Iterations:** {state.get('iteration', 0)}
-**Findings Collected:** {len(state.get('findings', []))}
-**Queries Executed:** {len(state.get('executed_queries', []))}
-**Correlations Found:** {len(state.get('correlations', []))}
-**Key Insights:** {len(state.get('key_insights', []))}
-"""
-    logger.markdown(stats)
+    # Check if we have the report content from finalize
+    report_content = state.get("report_content")
     
-    # Key Insights
-    if state.get("key_insights"):
-        logger.divider("Key Insights")
-        for i, insight in enumerate(state["key_insights"], 1):
-            if insight:
-                logger.markdown(f"**{i}.** {insight}")
-    
-    # Correlations
-    if state.get("correlations"):
-        logger.divider("Correlations")
-        for corr in state["correlations"]:
-            logger.markdown(f"""
-- **Type:** {corr.get('correlation_type', 'unknown')}
-- **Description:** {corr.get('description', 'N/A')}
-- **Confidence:** {corr.get('confidence', 'unknown')}
-""")
-    
-    # Detailed Report
-    if state.get("detailed_report"):
-        logger.divider("Detailed Report")
-        logger.markdown(state["detailed_report"])
-    
-    # Recommendations
-    if state.get("recommendations"):
-        logger.divider("Recommendations")
-        for i, rec in enumerate(state["recommendations"], 1):
-            logger.markdown(f"**{i}.** {rec}")
-    
-    # Confidence Assessment
-    if state.get("confidence_assessment"):
-        logger.panel(
-            state["confidence_assessment"],
-            title="🎯 Confidence Assessment",
-            style="cyan",
-        )
-    
-    # Uncertainties
-    if state.get("uncertainties"):
-        logger.divider("Uncertainties & Gaps")
-        for unc in state["uncertainties"]:
-            logger.markdown(f"- {unc}")
-    
-    # Error if any
-    if state.get("error"):
-        logger.error(f"Research encountered an error: {state['error']}")
+    if report_content:
+        # Print the full SITREP report as formatted markdown
+        console.print()
+        console.print(Markdown(report_content))
+        console.print()
+        
+        # Show where the report was saved
+        if state.get("output_paths"):
+            logger.info(f"Report saved to: [bold]{state['output_paths'].get('report', 'N/A')}[/bold]")
+    else:
+        # Fallback to old style if no report_content
+        logger.divider("Research Complete")
+        
+        if state.get("executive_summary"):
+            logger.panel(
+                state["executive_summary"],
+                title="📋 Executive Summary",
+                style="green",
+            )
+        
+        if state.get("key_insights"):
+            logger.divider("Key Insights")
+            for i, insight in enumerate(state["key_insights"][:5], 1):
+                if insight:
+                    logger.markdown(f"**{i}.** {insight}")
+        
+        if state.get("recommendations"):
+            logger.divider("Recommendations")
+            for i, rec in enumerate(state["recommendations"], 1):
+                logger.markdown(f"**{i}.** {rec}")
+        
+        if state.get("error"):
+            logger.error(f"Research encountered an error: {state['error']}")
 
 
 async def main() -> None:
