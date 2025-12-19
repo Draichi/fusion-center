@@ -20,6 +20,9 @@ class SynthesisNode(BaseNode):
     def get_phase_name(self) -> str:
         return "synthesizing"
     
+    def get_node_type(self) -> str:
+        return "thinking_markdown"
+    
     def get_prompt(self, state: AgentState) -> str:
         # Use verified data if available, otherwise fall back to original
         insights_to_use = state.get("verified_insights") or state.get("key_insights", [])
@@ -47,25 +50,33 @@ class SynthesisNode(BaseNode):
             if critical_notes:
                 reflection_summary = "\n## Critical Reflection Notes\n" + "\n".join([f"- {n['content']}" for n in critical_notes])
         
-        # Prepare findings with source information for citation
+        # Prepare findings with source information for citation (LIMIT TO LAST 50)
+        all_findings = state.get("findings", [])
         findings_for_citation = []
-        for i, finding in enumerate(state.get("findings", [])):
+        for i, finding in enumerate(all_findings[-50:]):  # Last 50 for more context
+            content = finding.get("content", "")
+            # Handle both dict and string content types
+            if isinstance(content, dict):
+                content_str = json.dumps(content)
+            else:
+                content_str = str(content)
+            
             findings_for_citation.append({
-                "finding_id": i + 1,
+                "finding_id": len(all_findings) - 50 + i + 1 if len(all_findings) > 50 else i + 1,
                 "source": finding.get("source"),
                 "source_type": finding.get("source_type"),
-                "timestamp": finding.get("timestamp"),
-                "content": finding.get("content"),
-                "location": finding.get("location"),
+                "content": content_str[:500],  # Increased to 500 chars for more detail
             })
         
-        # Prepare executed queries for reference
+        
+        
+        # Prepare executed queries for reference (LIMIT TO LAST 20)
+        all_queries = state.get("executed_queries", [])
         executed_queries_summary = []
-        for q in state.get("executed_queries", []):
+        for q in all_queries[-20:]:  # Last 20 for better coverage
             executed_queries_summary.append({
                 "tool": q.get("tool"),
-                "args": q.get("args"),
-                "timestamp": q.get("timestamp"),
+                "args": {k: str(v)[:100] for k, v in q.get("args", {}).items()},  # Increased to 100 chars
                 "status": q.get("status"),
             })
         
@@ -86,51 +97,48 @@ class SynthesisNode(BaseNode):
             elif "ioc" in tool.lower() or "threat" in tool.lower() or "otx" in tool.lower() or "pulse" in tool.lower():
                 sources_used.add("AlienVault OTX Threat Intelligence")
         
+        
+        findings_count = len(all_findings)
+        queries_count = len(all_queries)
+        
         return f"""
 {SITREP_SYNTHESIZER_PROMPT}
 
 ## ORIGINAL QUERY
 {state["task"]}
 
-## INTELLIGENCE SOURCES AVAILABLE
-{', '.join(sources_used) if sources_used else 'Multiple OSINT sources'}
-
-## RESEARCH PLAN
-{json.dumps(state.get("research_plan", {}), indent=2)}
+## DATA COLLECTION SUMMARY
+- Total Findings Collected: {findings_count} (showing last 50)
+- Total Queries Executed: {queries_count} (showing last 20)
+- Intelligence Sources: {', '.join(sources_used) if sources_used else 'Multiple OSINT'}
 {hypotheses_summary}
 
-## VERIFIED KEY INSIGHTS
-{json.dumps(insights_to_use, indent=2)}
+## KEY INSIGHTS (Top 20)
+{json.dumps(insights_to_use[:20], indent=2) if insights_to_use else "No insights"}
 
-## VERIFIED CORRELATIONS
-{json.dumps(correlations_to_use, indent=2)}
+## CORRELATIONS (Top 10)
+{json.dumps(correlations_to_use[:10], indent=2) if correlations_to_use else "No correlations"}
 
-## UNCERTAINTIES & INTELLIGENCE GAPS
-{json.dumps(state.get("uncertainties", []), indent=2)}
-{reflection_summary}
-
-## REASONING PROCESS SUMMARY
-- Reasoning depth: {state.get("reasoning_depth", 0)} steps
-- Reflection iterations: {state.get("reflection_iterations", 0)}
-- Verification results: {len(state.get("verification_results", []))} items verified
-
-## RAW FINDINGS (Sources for Citation)
-These are the actual data points collected from tools. CITE THESE in your report.
+## SAMPLE FINDINGS (Last 50 of {findings_count})
 {json.dumps(findings_for_citation, indent=2)}
 
-## QUERIES EXECUTED
+## SAMPLE QUERIES (Last 20 of {queries_count})
 {json.dumps(executed_queries_summary, indent=2)}
 
-Create a comprehensive SITREP intelligence report as JSON following the schema exactly.
-IMPORTANT: 
-- Include ALL 6 sections (section_i through section_vi)
-- Cite sources for every claim
-- Use intelligence community language
+Create a comprehensive SITREP intelligence report in MARKDOWN format.
+IMPORTANT:
+- Use proper markdown formatting with headers, lists, tables, etc.
+- Include ALL standard SITREP sections
+- Cite sources for every claim using findings
+- Use intelligence community language and terminology
 - Include probability assessments where appropriate
-- Complete the source reliability matrix in section_v
+- Use tables for source reliability matrix
+- Make it comprehensive and professional
 """
     
     def get_output_schema(self) -> type:
+        # Not used for thinking_markdown mode, but required by interface
+        # BaseNode will handle markdown output directly
         return SITREPOutput
     
     def process_output(
@@ -139,48 +147,32 @@ IMPORTANT:
         output: dict[str, Any],
         thinking: str = "",
     ) -> dict[str, Any]:
-        """Process the SITREP output and prepare state update."""
-        report = output
+        """Process the markdown report output and prepare state update."""
         
-        logger.success("SITREP intelligence report synthesized")
+        # Get markdown report from output
+        markdown_report = output.get("markdown_report", "")
         
-        # Extract key fields for state update
-        section_i = report.get("section_i", {})
-        section_ii = report.get("section_ii", {})
-        section_iii = report.get("section_iii", {})
-        section_iv = report.get("section_iv", {})
-        section_v = report.get("section_v", {})
-        section_vi = report.get("section_vi", {})
+        if not markdown_report:
+            logger.warning("No markdown report generated")
+            markdown_report = "# Error\n\nFailed to generate report."
         
-        # Build executive summary from Section I
-        direct_response = section_i.get("direct_response", "")
-        confidence = section_i.get("overall_confidence_percent", 75)
+        logger.success(f"SITREP intelligence report synthesized ({len(markdown_report)} characters)")
         
-        # Build recommendations from Section IV
-        recommendations = (
-            section_iv.get("immediate_actions", []) +
-            section_iv.get("monitoring_indicators", [])[:2]
-        )
+        # Extract first paragraph as executive summary
+        lines = markdown_report.split("\n")
+        exec_summary = ""
+        for line in lines:
+            if line.strip() and not line.startswith("#"):
+                exec_summary = line.strip()
+                break
         
-        # Store the full SITREP report for output writer
+        # Store the markdown report directly
         return {
-            # Legacy fields for compatibility
-            "executive_summary": direct_response,
-            "detailed_report": "",  # Will be generated by output writer
-            "recommendations": recommendations,
-            "confidence_assessment": f"{confidence}% - {section_i.get('intelligence_quality', 'GOOD')} quality",
-            
-            # New SITREP fields
-            "sitrep_output": report,
-            "classification": report.get("classification", "OSINT / PUBLIC"),
-            "query_summary": report.get("query_summary", state.get("task", "")),
-            "intelligence_sources_used": report.get("intelligence_sources_used", []),
-            "section_i": section_i,
-            "section_ii": section_ii,
-            "section_iii": section_iii,
-            "section_iv": section_iv,
-            "section_v": section_v,
-            "section_vi": section_vi,
+            "executive_summary": exec_summary or "SITREP report completed",
+            "detailed_report": markdown_report,
+            "markdown_report": markdown_report,  # Primary field for markdown content
+            "recommendations": [],  # Can be extracted from markdown if needed
+            "confidence_assessment": "Report generated via dual-LLM reasoning",
         }
     
     def get_next_phase(self, state: AgentState, output: dict[str, Any]) -> str:

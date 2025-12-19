@@ -395,7 +395,20 @@ When specifying `test_queries`, follow these rules:
 - Consider null hypothesis where appropriate
 - Base initial confidence on prior knowledge and context
 
-Respond ONLY with JSON:
+## CRITICAL: Confidence Values Format
+
+**IMPORTANT**: Confidence values MUST be decimal numbers between 0.0 and 1.0 (NOT percentages 0-100).
+- ✅ CORRECT: 0.60 (means 60% confidence)
+- ✅ CORRECT: 0.75 (means 75% confidence)
+- ✅ CORRECT: 0.50 (means 50% confidence)
+- ❌ WRONG: 60 (this is invalid - use 0.60 instead)
+- ❌ WRONG: 75 (this is invalid - use 0.75 instead)
+
+## CRITICAL: Output Format
+
+Respond ONLY with valid JSON. Do NOT write markdown text, explanations, or prose.
+
+**JSON Schema Example:**
 {{
     "reasoning_chain": [
         "First, I observe that...",
@@ -445,7 +458,20 @@ Review the new findings and update each hypothesis:
 3. Update hypothesis status (investigating, supported, refuted, inconclusive)
 4. Identify what evidence is still needed
 
-Respond ONLY with JSON:
+## CRITICAL: Confidence Values Format
+
+**IMPORTANT**: Confidence values MUST be decimal numbers between 0.0 and 1.0 (NOT percentages 0-100).
+- ✅ CORRECT: 0.95 (means 95% confidence)
+- ✅ CORRECT: 0.75 (means 75% confidence)
+- ✅ CORRECT: 0.50 (means 50% confidence)
+- ❌ WRONG: 95 (this is invalid - use 0.95 instead)
+- ❌ WRONG: 75 (this is invalid - use 0.75 instead)
+
+## CRITICAL: Output Format
+
+Respond ONLY with valid JSON. Do NOT write markdown text, explanations, or prose.
+
+**JSON Schema Example:**
 {{
     "reasoning_chain": [
         "Looking at finding #X, this relates to hypothesis H1 because...",
@@ -464,6 +490,8 @@ Respond ONLY with JSON:
         }}
     ]
 }}
+
+**CRITICAL:** You MUST return ONLY valid JSON matching this structure. Do NOT return markdown text starting with "Let's review..." or similar prose. Return JSON ONLY.
 """
 
 

@@ -20,6 +20,9 @@ class VerificationNode(BaseNode):
     def get_phase_name(self) -> str:
         return "verifying"
     
+    def get_node_type(self) -> str:
+        return "thinking"
+    
     def get_prompt(self, state: AgentState) -> str:
         return f"""
 {VERIFICATION_PROMPT}

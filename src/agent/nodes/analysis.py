@@ -23,6 +23,9 @@ class AnalysisNode(BaseNode):
     def get_phase_name(self) -> str:
         return "analyzing"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         findings = state.get("findings", [])
         available_tools = get_tool_definitions()

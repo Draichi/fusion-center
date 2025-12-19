@@ -132,13 +132,42 @@ def get_llm(
         )
 
 
+def get_dual_llms() -> tuple[BaseChatModel, BaseChatModel]:
+    """
+    Get both thinking and structured LLMs for dual-LLM architecture.
+    
+    Returns:
+        Tuple of (thinking_llm, structured_llm)
+    """
+    logger.info("Initializing dual-LLM architecture...")
+    
+    # Initialize thinking LLM
+    thinking_llm = get_llm(
+        provider=settings.thinking_llm_provider,
+        model=settings.thinking_llm_model,
+        temperature=settings.thinking_llm_temperature,
+    )
+    logger.info(f"  Thinking LLM: [bold]{settings.thinking_llm_provider}/{settings.thinking_llm_model}[/bold] (temp={settings.thinking_llm_temperature})")
+    
+    # Initialize structured LLM
+    structured_llm = get_llm(
+        provider=settings.structured_llm_provider,
+        model=settings.structured_llm_model,
+        temperature=settings.structured_llm_temperature,
+    )
+    logger.info(f"  Structured LLM: [bold]{settings.structured_llm_provider}/{settings.structured_llm_model}[/bold] (temp={settings.structured_llm_temperature})")
+    
+    return thinking_llm, structured_llm
+
+
 def build_research_graph(
-    llm: BaseChatModel,
+    thinking_llm: BaseChatModel,
+    structured_llm: BaseChatModel,
     checkpointer: MemorySaver | None = None,
     enable_multi_step_reasoning: bool = True,
 ) -> StateGraph:
     """
-    Build the LangGraph for deep research with multi-step reasoning.
+    Build the LangGraph for deep research with multi-step reasoning and dual-LLM architecture.
     
     The graph follows this enhanced flow with multi-step reasoning:
     
@@ -151,8 +180,13 @@ def build_research_graph(
     - Self-reflection and bias checking
     - Verification before synthesis
     
+    Dual-LLM architecture:
+    - Thinking LLM: Complex reasoning (reflection, verification, synthesis)
+    - Structured LLM: Structured outputs (planning, analysis, correlation)
+    
     Args:
-        llm: Language model to use for reasoning
+        thinking_llm: Language model for complex reasoning tasks
+        structured_llm: Language model for structured JSON outputs
         checkpointer: Optional checkpointer for persistence
         enable_multi_step_reasoning: Whether to use enhanced reasoning (default True)
         
@@ -163,15 +197,15 @@ def build_research_graph(
     # Create the graph with our state schema
     graph = StateGraph(AgentState)
     
-    # === Initialize Node Strategies ===
-    planning_node = PlanningNode(llm)
-    decomposition_node = DecompositionNode(llm)
-    hypothesis_node = HypothesisGenerationNode(llm)
-    analysis_node = AnalysisNode(llm)
-    reflection_node = ReflectionNode(llm)
-    correlation_node = CorrelationNode(llm)
-    verification_node = VerificationNode(llm)
-    synthesis_node = SynthesisNode(llm)
+    # === Initialize Node Strategies with Dual LLMs ===
+    planning_node = PlanningNode(thinking_llm, structured_llm)
+    decomposition_node = DecompositionNode(thinking_llm, structured_llm)
+    hypothesis_node = HypothesisGenerationNode(thinking_llm, structured_llm)
+    analysis_node = AnalysisNode(thinking_llm, structured_llm)
+    reflection_node = ReflectionNode(thinking_llm, structured_llm)
+    correlation_node = CorrelationNode(thinking_llm, structured_llm)
+    verification_node = VerificationNode(thinking_llm, structured_llm)
+    synthesis_node = SynthesisNode(thinking_llm, structured_llm)
     
     # Gather node - placeholder that will be replaced per-run (needs tool_executor)
     async def gather_node(state: AgentState) -> dict[str, Any]:
@@ -286,44 +320,45 @@ class DeepResearchAgent:
     def __init__(
         self,
         mcp_server_url: str | None = None,
-        provider: str | None = None,
-        model: str | None = None,
-        temperature: float | None = None,
+        provider: str | None = None,  # Deprecated: ignored, uses dual-LLM from .env
+        model: str | None = None,  # Deprecated: ignored, uses dual-LLM from .env
+        temperature: float | None = None,  # Deprecated: ignored, uses dual-LLM from .env
         max_iterations: int | None = None,
         use_checkpointer: bool = True,
     ):
         """
-        Initialize the Deep Research Agent.
+        Initialize the Deep Research Agent with dual-LLM architecture.
+        
+        The agent always uses two separate LLMs configured in .env:
+        - THINKING_LLM_* for complex reasoning (reflection, verification, synthesis)
+        - STRUCTURED_LLM_* for structured JSON outputs (planning, analysis, correlation)
         
         Args:
             mcp_server_url: URL of the MCP server SSE endpoint
-            provider: LLM provider (gemini, grok, ollama, docker)
-            model: Model name override
-            temperature: LLM temperature
+            provider: DEPRECATED - ignored, dual-LLM config from .env is used
+            model: DEPRECATED - ignored, dual-LLM config from .env is used
+            temperature: DEPRECATED - ignored, dual-LLM config from .env is used
             max_iterations: Maximum research iterations
             use_checkpointer: Whether to enable state persistence
         """
         self.mcp_server_url = mcp_server_url or f"http://{settings.mcp_server_host}:{settings.mcp_server_port}/sse"
-        self.provider = provider or settings.agent_provider
-        self.model = model
-        self.temperature = temperature
         self.max_iterations = max_iterations if max_iterations is not None else settings.agent_max_iterations
         
-        # Initialize LLM
-        self.llm = get_llm(
-            provider=self.provider,
-            model=self.model,
-            temperature=self.temperature,
-        )
+        # Always use dual-LLM architecture (ignore legacy parameters if passed)
+        if provider or model or temperature is not None:
+            logger.debug(f"Ignoring legacy parameters (provider={provider}, model={model}, temperature={temperature})")
+            logger.debug("Using dual-LLM configuration from .env instead")
+        
+        # Initialize dual LLMs from .env configuration
+        self.thinking_llm, self.structured_llm = get_dual_llms()
         
         # Initialize checkpointer for persistence
         self.checkpointer = MemorySaver() if use_checkpointer else None
         
-        # Build the graph
-        self.graph = build_research_graph(self.llm, self.checkpointer)
+        # Build the graph with dual LLMs
+        self.graph = build_research_graph(self.thinking_llm, self.structured_llm, self.checkpointer)
         
-        logger.info(f"Deep Research Agent initialized")
-        logger.info(f"Provider: [bold]{self.provider}[/bold]")
+        logger.info(f"Deep Research Agent initialized with dual-LLM architecture")
         logger.info(f"MCP Server: [bold]{self.mcp_server_url}[/bold]")
     
     async def research(
@@ -432,6 +467,46 @@ class DeepResearchAgent:
                 "current_phase": ResearchPhase.COMPLETE.value,
             }
     
+    async def _execute_node_with_error_check(self, node, state, node_name):
+        """Helper to execute node and check for errors."""
+        try:
+            updates = await node.execute(state)
+            
+            # Check if updates is None
+            if updates is None:
+                logger.error(f"❌ Node {node_name} returned None instead of dict")
+                error_state = {
+                    **state,
+                    "error": f"{node_name} returned None",
+                    "current_phase": ResearchPhase.COMPLETE.value,
+                    "iteration": state["iteration"] + 1,
+                }
+                return error_state, True
+            
+            # Check if node returned an error
+            if "error" in updates:
+                logger.error(f"❌ Error in {node_name} phase: {updates['error']}")
+                # Force completion with error
+                return {**state, **updates, "current_phase": ResearchPhase.COMPLETE.value}, True
+            
+            # Get next phase
+            next_phase = node.get_next_phase(state, updates)
+            updates["current_phase"] = next_phase
+            
+            return {**state, **updates}, False
+            
+        except Exception as e:
+            logger.error(f"❌ Unhandled exception in {node_name}: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            error_state = {
+                **state,
+                "error": f"{type(e).__name__}: {str(e)}",
+                "current_phase": ResearchPhase.COMPLETE.value,
+                "iteration": state["iteration"] + 1,
+            }
+            return error_state, True
+
     async def _run_with_mcp(
         self,
         initial_state: AgentState,
@@ -449,16 +524,16 @@ class DeepResearchAgent:
         """
         state = initial_state
         
-        # Initialize node strategies
-        planning_node = PlanningNode(self.llm)
-        decomposition_node = DecompositionNode(self.llm)
-        hypothesis_node = HypothesisGenerationNode(self.llm)
-        hypothesis_update_node = HypothesisUpdateNode(self.llm)
-        analysis_node = AnalysisNode(self.llm)
-        reflection_node = ReflectionNode(self.llm)
-        correlation_node = CorrelationNode(self.llm)
-        verification_node = VerificationNode(self.llm)
-        synthesis_node = SynthesisNode(self.llm)
+        # Initialize node strategies with dual LLMs
+        planning_node = PlanningNode(self.thinking_llm, self.structured_llm)
+        decomposition_node = DecompositionNode(self.thinking_llm, self.structured_llm)
+        hypothesis_node = HypothesisGenerationNode(self.thinking_llm, self.structured_llm)
+        hypothesis_update_node = HypothesisUpdateNode(self.thinking_llm, self.structured_llm)
+        analysis_node = AnalysisNode(self.thinking_llm, self.structured_llm)
+        reflection_node = ReflectionNode(self.thinking_llm, self.structured_llm)
+        correlation_node = CorrelationNode(self.thinking_llm, self.structured_llm)
+        verification_node = VerificationNode(self.thinking_llm, self.structured_llm)
+        synthesis_node = SynthesisNode(self.thinking_llm, self.structured_llm)
         
         total_iterations = state["max_iterations"]
         with alive_bar(total_iterations, manual=True, title="Deep Researching", bar="smooth", spinner=None, enrich_print=False) as bar:
@@ -480,30 +555,30 @@ class DeepResearchAgent:
                     phase = state["current_phase"]
                     
                     if phase == ResearchPhase.PLANNING.value:
-                        updates = await planning_node.execute(state)
-                        updates["current_phase"] = planning_node.get_next_phase(state, updates)
-                        state = {**state, **updates}
+                        state, has_error = await self._execute_node_with_error_check(planning_node, state, "planning")
+                        if has_error:
+                            break
                     
                     # Multi-step Reasoning: Task Decomposition
                     elif phase == ResearchPhase.DECOMPOSING.value:
-                        updates = await decomposition_node.execute(state)
-                        updates["current_phase"] = decomposition_node.get_next_phase(state, updates)
-                        state = {**state, **updates}
+                        state, has_error = await self._execute_node_with_error_check(decomposition_node, state, "decomposition")
+                        if has_error:
+                            break
                     
                     # Multi-step Reasoning: Hypothesis Generation
                     elif phase == ResearchPhase.HYPOTHESIZING.value:
-                        updates = await hypothesis_node.execute(state)
-                        updates["current_phase"] = hypothesis_node.get_next_phase(state, updates)
-                        state = {**state, **updates}
+                        state, has_error = await self._execute_node_with_error_check(hypothesis_node, state, "hypothesis")
+                        if has_error:
+                            break
                         
                     elif phase == ResearchPhase.GATHERING.value:
                         updates = await gather_intelligence(state, tool_executor)
                         state = {**state, **updates}
                         # After gathering, update hypotheses if we have any
                         if state.get("hypotheses"):
-                            updates = await hypothesis_update_node.execute(state)
-                            updates["current_phase"] = hypothesis_update_node.get_next_phase(state, updates)
-                            state = {**state, **updates}
+                            state, has_error = await self._execute_node_with_error_check(hypothesis_update_node, state, "hypothesis_update")
+                            if has_error:
+                                break
                         
                     elif phase == ResearchPhase.ANALYZING.value:
                         updates = await analysis_node.execute(state)

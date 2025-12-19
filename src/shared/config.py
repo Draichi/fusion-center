@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     agent_temperature: float = 0.7
     agent_max_iterations: int = 10
 
+    # ==========================================================================
+    # Dual LLM Configuration
+    # ==========================================================================
+    
+    # Structured Output LLM (JSON mode, for planning/analysis/correlation nodes)
+    structured_llm_provider: Literal["gemini", "grok", "ollama", "docker"] = "ollama"
+    structured_llm_model: str = "qwen2.5:7b"
+    structured_llm_temperature: float = 0.3
+    
+    # Thinking/Reasoning LLM (for reflection/verification/synthesis nodes)
+    thinking_llm_provider: Literal["gemini", "grok", "ollama", "docker"] = "ollama"
+    thinking_llm_model: str = "llama3.2"
+    thinking_llm_temperature: float = 0.7
+
     # Logging
     log_level: str = "INFO"
 

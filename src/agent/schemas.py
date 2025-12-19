@@ -6,7 +6,7 @@ reliable JSON responses from LLMs, even those that don't have native JSON mode.
 """
 
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # =============================================================================
@@ -93,6 +93,14 @@ class Hypothesis(BaseModel):
     supporting_evidence_criteria: list[str] = Field(default_factory=list, description="What would support this")
     refuting_evidence_criteria: list[str] = Field(default_factory=list, description="What would refute this")
     test_queries: list[TestQuery] = Field(default_factory=list, description="Queries to test this hypothesis")
+    
+    @field_validator('initial_confidence', mode='before')
+    @classmethod
+    def normalize_confidence(cls, v):
+        """Auto-normalize confidence if LLM returns percentage (0-100) instead of decimal (0-1)."""
+        if isinstance(v, (int, float)) and v > 1:
+            return v / 100.0
+        return v
 
 
 class HypothesisGenerationOutput(BaseModel):
@@ -114,6 +122,14 @@ class HypothesisUpdate(BaseModel):
     new_supporting_evidence: list[str] = Field(default_factory=list, description="New supporting evidence")
     new_contradicting_evidence: list[str] = Field(default_factory=list, description="New contradicting evidence")
     confidence_change_reason: str = Field(description="Reason for confidence change")
+    
+    @field_validator('new_confidence', mode='before')
+    @classmethod
+    def normalize_confidence(cls, v):
+        """Auto-normalize confidence if LLM returns percentage (0-100) instead of decimal (0-1)."""
+        if isinstance(v, (int, float)) and v > 1:
+            return v / 100.0
+        return v
 
 
 class HypothesisUpdateOutput(BaseModel):

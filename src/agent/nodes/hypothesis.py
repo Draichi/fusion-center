@@ -22,6 +22,9 @@ class HypothesisGenerationNode(BaseNode):
     def get_phase_name(self) -> str:
         return "hypothesizing"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         # Build context from existing findings if any
         findings_summary = ""
@@ -63,11 +66,24 @@ Generate hypotheses that can be tested with these tools.
         test_queries = []
         
         for h in result.get("hypotheses", []):
+            # Auto-normalize confidence if LLM returned 0-100 instead of 0-1
+            initial_conf = h.get("initial_confidence", 0.5)
+            if initial_conf > 1:
+                normalized_conf = initial_conf / 100.0
+                logger.warning(
+                    f"⚠️  Auto-normalized initial_confidence for {h.get('id', 'hypothesis')}: "
+                    f"{initial_conf} → {normalized_conf:.2f} (LLM returned percentage instead of decimal)"
+                )
+                initial_conf = normalized_conf
+            
+            # Clamp to valid range [0, 1] as defensive measure
+            initial_conf = max(0.0, min(1.0, initial_conf))
+            
             hypothesis = {
                 "id": h.get("id", f"h{len(hypotheses) + 1}"),
                 "statement": h.get("statement", ""),
                 "status": HypothesisStatus.PROPOSED.value,
-                "confidence": h.get("initial_confidence", 0.5),
+                "confidence": initial_conf,
                 "supporting_evidence": [],
                 "contradicting_evidence": [],
                 "reasoning": "",
@@ -137,6 +153,9 @@ class HypothesisUpdateNode(BaseNode):
     def get_phase_name(self) -> str:
         return "hypothesis_update"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         return f"""
 {HYPOTHESIS_UPDATE_PROMPT}
@@ -173,7 +192,19 @@ Review each finding and update hypothesis confidence accordingly.
             h_id = update.get("hypothesis_id")
             if h_id in updated_hypotheses:
                 h = updated_hypotheses[h_id]
-                h["confidence"] = update.get("new_confidence", h["confidence"])
+                
+                # Auto-normalize confidence if LLM returned 0-100 instead of 0-1
+                new_conf = update.get("new_confidence", h["confidence"])
+                if new_conf > 1:
+                    normalized_conf = new_conf / 100.0
+                    logger.warning(
+                        f"⚠️  Auto-normalized confidence for {h_id}: "
+                        f"{new_conf} → {normalized_conf:.2f} (LLM returned percentage instead of decimal)"
+                    )
+                    new_conf = normalized_conf
+                
+                # Clamp to valid range [0, 1] as defensive measure
+                h["confidence"] = max(0.0, min(1.0, new_conf))
                 h["status"] = update.get("new_status", h["status"])
                 h["supporting_evidence"].extend(update.get("new_supporting_evidence", []))
                 h["contradicting_evidence"].extend(update.get("new_contradicting_evidence", []))

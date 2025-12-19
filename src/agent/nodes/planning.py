@@ -23,6 +23,9 @@ class PlanningNode(BaseNode):
     def get_phase_name(self) -> str:
         return "planning"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         return f"""
 {PLANNER_PROMPT}

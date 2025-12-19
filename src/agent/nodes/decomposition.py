@@ -20,6 +20,9 @@ class DecompositionNode(BaseNode):
     def get_phase_name(self) -> str:
         return "decomposing"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         return f"""
 {TASK_DECOMPOSITION_PROMPT}

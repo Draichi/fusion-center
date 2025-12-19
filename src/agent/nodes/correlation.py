@@ -19,6 +19,9 @@ class CorrelationNode(BaseNode):
     def get_phase_name(self) -> str:
         return "correlating"
     
+    def get_node_type(self) -> str:
+        return "structured"
+    
     def get_prompt(self, state: AgentState) -> str:
         findings = state.get("findings", [])
         
