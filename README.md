@@ -165,13 +165,15 @@ The timing and intensity of "de-escalation" messaging suggests a **strategic dec
 |----------|------|-------------|
 | 📰 **News** | `search_news` | Search GDELT for global news |
 | 📰 **News** | `fetch_rss_news` | Fetch articles from RSS feeds (Meduza, The Insider, The Cradle) |
+| 🔍 **Search** | `search_internet` | General web search via DuckDuckGo |
+| 🔍 **Search** | `search_leaks` | Search leaked datasets (DDoS Secrets) |
 | 🛰️ **Satellite** | `detect_thermal_anomalies` | NASA FIRMS fire/explosion detection |
 | 🌐 **Cyber** | `check_connectivity` | IODA internet outage detection |
 | 🌐 **Cyber** | `check_traffic_metrics` | Cloudflare Radar analysis |
 | 📱 **Telegram** | `search_telegram` | Search OSINT Telegram channels |
 | 📱 **Telegram** | `get_channel_info` | Get Telegram channel metadata |
 | 📱 **Telegram** | `list_osint_channels` | List curated OSINT channels |
-| 🔍 **Threat Intel** | `check_ioc` | Look up IoC in AlienVault OTX |
+|  🔍 **Threat Intel** | `check_ioc` | Look up IoC in AlienVault OTX |
 | 🔍 **Threat Intel** | `get_threat_pulse` | Get OTX pulse details |
 | 🔍 **Threat Intel** | `search_threats` | Search OTX threat pulses |
 
@@ -392,6 +394,8 @@ async def run_analysis():
 
 | Source | Description | Auth |
 |--------|-------------|------|
+| [DuckDuckGo](https://duckduckgo.com/) | Privacy-focused web search | Free (no API key) |
+| [DDoS Secrets](https://ddosecrets.com/) | Leaked/hacked data archive  | Free (web scraping) |
 | [GDELT](https://www.gdeltproject.org/) | Global news monitoring | Free |
 | [Meduza](https://meduza.io/) | Independent Russian news | Free (RSS) |
 | [The Insider](https://theinsider.me/) | Russian investigative journalism | Free (RSS) |
@@ -535,12 +539,12 @@ All reasoning steps are logged to `reasoning.log` including:
 - [x] **RSS Feeds** - Independent news sources (Meduza, The Insider, The Cradle)
 
 ### 🟡 Future
-- [x] Two agents, one for reasoning and onde for strictly JSON output
+- [x] Two agents, one for reasoning and one for strictly JSON output
 - [x] Event correlation engine
 - [x] Web dashboard
-- [ ] add duckduckgo search tool
-- [ ] add https://ddosecrets.com/ as a tool
-- [ ] create a poc agent using PydanticAI instead of the current langchain agent
+- [x] Add DuckDuckGo search tool
+- [x] Add https://ddosecrets.com/ as a tool (web scraping)
+- [ ] Create a PoC agent using PydanticAI instead of the current langchain agent
 
 ## 📄 License
 

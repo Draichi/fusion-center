@@ -572,6 +572,88 @@ async def test_otx_threat_search() -> TestResult:
         )
 
 
+async def test_duckduckgo_search() -> TestResult:
+    """Test DuckDuckGo internet search."""
+    from src.mcp_server.tools.search import search_web
+    
+    start = datetime.now()
+    try:
+        result = await search_web(
+            query="Ukraine conflict news",
+            max_results=5,
+            time_range="w"  # Last week
+        )
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        
+        if result.get("status") == "error":
+            return TestResult(
+                tool_name="DuckDuckGo Search (search_internet)",
+                status=TestStatus.ERROR,
+                message=result.get("error_message", "Unknown error"),
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        result_count = result.get("result_count", 0)
+        return TestResult(
+            tool_name="DuckDuckGo Search (search_internet)",
+            status=TestStatus.SUCCESS if result_count > 0 else TestStatus.EMPTY,
+            message=f"Found {result_count} search results" if result_count > 0 else "No results found (API working)",
+            data_count=result_count,
+            response_time_ms=elapsed,
+            raw_response=result
+        )
+    except Exception as e:
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        return TestResult(
+            tool_name="DuckDuckGo Search (search_internet)",
+            status=TestStatus.ERROR,
+            message=f"Exception: {type(e).__name__}: {str(e)}",
+            response_time_ms=elapsed
+        )
+
+
+async def test_ddos_secrets_search() -> TestResult:
+    """Test DDoS Secrets leak search."""
+    from src.mcp_server.tools.search import search_ddos_secrets_db
+    
+    start = datetime.now()
+    try:
+        result = await search_ddos_secrets_db(
+            query="government",
+            max_results=5
+        )
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        
+        if result.get("status") == "error":
+            # Web scraping errors are expected if site structure changed
+            return TestResult(
+                tool_name="DDoS Secrets Search (search_leaks)",
+                status=TestStatus.ERROR,
+                message=f"Expected failure (web scraping): {result.get('error_message', 'Unknown error')}",
+                response_time_ms=elapsed,
+                raw_response=result
+            )
+        
+        result_count = result.get("result_count", 0)
+        return TestResult(
+            tool_name="DDoS Secrets Search (search_leaks)",
+            status=TestStatus.SUCCESS if result_count > 0 else TestStatus.EMPTY,
+            message=f"Found {result_count} leaks" if result_count > 0 else "No leaks found (site structure may have changed)",
+            data_count=result_count,
+            response_time_ms=elapsed,
+            raw_response=result
+        )
+    except Exception as e:
+        elapsed = (datetime.now() - start).total_seconds() * 1000
+        return TestResult(
+            tool_name="DDoS Secrets Search (search_leaks)",
+            status=TestStatus.ERROR,
+            message=f"Exception: {type(e).__name__}: {str(e)}",
+            response_time_ms=elapsed
+        )
+
+
 # =============================================================================
 # Main Test Runner
 # =============================================================================
@@ -580,6 +662,8 @@ async def test_otx_threat_search() -> TestResult:
 TOOL_MAP = {
     "gdelt": test_gdelt_news,
     "rss": test_rss_feed,
+    "duckduckgo": test_duckduckgo_search,
+    "ddos_secrets": test_ddos_secrets_search,
     "nasa": test_nasa_firms,
     "ioda": test_ioda_connectivity,
     "ioda_outages": test_ioda_outages,

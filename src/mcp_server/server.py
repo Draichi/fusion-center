@@ -26,6 +26,7 @@ from src.mcp_server.tools.cyber import check_cloudflare_radar, check_internet_ou
 from src.mcp_server.tools.geo import check_nasa_firms
 from src.mcp_server.tools.news import query_gdelt_events
 from src.mcp_server.tools.rss import fetch_rss_feed
+from src.mcp_server.tools.search import search_web, search_ddos_secrets_db
 from src.mcp_server.tools.telegram import (
     search_telegram_channels,
     get_telegram_channel_info,
@@ -698,6 +699,120 @@ def list_osint_channels() -> dict[str, Any]:
 
 
 # =============================================================================
+# Internet Search Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def search_internet(
+    query: str,
+    max_results: int = 10,
+    region: str | None = None,
+    time_range: str = "all",
+) -> dict[str, Any]:
+    """
+    Search the internet using DuckDuckGo.
+
+    Use this tool for general web search to:
+    - Research topics not covered by specialized databases
+    - Fact-check information across multiple sources
+    - Find recent news, articles, reports, or analysis
+    - Discover background information on organizations, events, or people
+    - Supplement GDELT news searches with broader internet coverage
+
+    **No API key required** - DuckDuckGo is privacy-focused and free to use.
+
+    Args:
+        query: Search query (e.g., "Ukraine conflict analysis", "cyber attack Iran").
+        max_results: Maximum number of results to return (1-50). Default: 10.
+        region: Optional region for localized results (e.g., "us-en", "uk-en", "br-pt").
+                Leave empty for worldwide results.
+        time_range: Filter by time period:
+                    - "all": All time (default)
+                    - "d": Past day
+                    - "w": Past week
+                    - "m": Past month
+                    - "y": Past year
+
+    Returns:
+        Dictionary with search results containing titles, URLs, and snippets.
+    """
+    log_tool_call(
+        "search_internet",
+        query=query,
+        max_results=max_results,
+        region=region,
+        time_range=time_range,
+    )
+
+    result = await search_web(
+        query=query,
+        max_results=max_results,
+        region=region,
+        time_range=time_range,
+    )
+
+    logger.result_summary(
+        tool_name="search_internet",
+        status=result.get("status", "unknown"),
+        count=result.get("result_count", 0),
+        details={"query": query, "time_range": time_range},
+    )
+
+    return result
+
+
+@mcp.tool()
+async def search_leaks(
+    query: str,
+    max_results: int = 20,
+) -> dict[str, Any]:
+    """
+    Search DDoS Secrets (Distributed Denial of Secrets) for leaked datasets.
+
+    DDoS Secrets is a transparency collective that archives and publishes leaked
+    data from government agencies, corporations, and other organizations.
+    Use this tool to:
+    - Find leaked documents and datasets
+    - Research data breaches and hacks
+    - Investigate government/corporate transparency issues
+    - Access whistleblower materials
+
+    **WARNING**: This tool uses web scraping (no official API exists).
+    Results may be incomplete or unavailable if the site structure changes.
+
+    **No API key required** - The site is publicly accessible.
+
+    Args:
+        query: Search keywords (e.g., "government surveillance", "police files",
+               "corporate data breach").
+        max_results: Maximum number of results (1-50). Default: 20.
+
+    Returns:
+        Dictionary with leaked datasets including titles, URLs, and descriptions.
+    """
+    log_tool_call(
+        "search_leaks",
+        query=query,
+        max_results=max_results,
+    )
+
+    result = await search_ddos_secrets_db(
+        query=query,
+        max_results=max_results,
+    )
+
+    logger.result_summary(
+        tool_name="search_leaks",
+        status=result.get("status", "unknown"),
+        count=result.get("result_count", 0),
+        details={"query": query},
+    )
+
+    return result
+
+
+# =============================================================================
 # Server Entry Point
 # =============================================================================
 
@@ -750,6 +865,8 @@ def main() -> None:
     tools_info = [
         ("search_news", "📰 News", "Search GDELT for news articles"),
         ("fetch_rss_news", "📰 News", "Fetch RSS feeds from independent sources"),
+        ("search_internet", "🔍 Search", "DuckDuckGo web search"),
+        ("search_leaks", "🔍 Search", "DDoS Secrets leak archive search"),
         ("detect_thermal_anomalies", "🛰️ Satellite", "NASA FIRMS fire detection"),
         ("check_connectivity", "🌐 Cyber", "IODA connectivity status"),
         ("get_outages", "🌐 Cyber", "IODA detected outage events"),
