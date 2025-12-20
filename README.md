@@ -36,20 +36,101 @@ To see the agent at its full potential, try these queries that force multi-domai
 <summary>📄 <b>Click to view Sample Intelligence Report Output</b></summary>
 
 ```markdown
-# Intelligence Report
-**Generated:** 2024-05-15 14:30:22 | **Confidence:** High (0.85)
-**Task:** "Analyze 'thermal anomaly' vs 'peace talks' sentiment in Donbas (14d)"
+🔴 **COMPREHENSIVE OSINT SITREP – PROJECT OVERWATCH**
 
-## Executive Summary
-Analysis indicates a **divergence** between diplomatic rhetoric and kinetic reality. News sentiment for "peace talks" increased 40%, yet thermal anomalies in Donbas spiked 15% (avg 150/day). **Current diplomatic statements are likely a stalling tactic.**
+**CLASSIFICATION:** OSINT / PUBLIC
+**DTG:** 18 DEC 2025 / 19:30Z
+**QUERY:** "Compare official GDELT state media narrative vs. Telegram OSINT on Ukraine border tensions"
+**INTELLIGENCE SOURCES:** GDELT, Telegram OSINT, AlienVault OTX, NASA FIRMS
 
-## Key Insights
-1.  **Kinetic Intensity:** NASA FIRMS detected 2,450 thermal anomalies. High intensity suggests artillery, not wildfires.
-2.  **Rhetoric-Reality Gap:** "Negotiation" keywords in GDELT surged on May 10th, coinciding with the kinetic spike.
-3.  **Local Confirmation:** Telegram channels (`@rybar`) discuss "holding positions", contradicting the "peace" narrative.
+–––
 
-## Correlations Found
-*   **Temporal Divergence:** Inverse correlation between "peace talk" news volume and combat reduction.
+## SECTION I – EXECUTIVE INTELLIGENCE SUMMARY
+
+### A. DIRECT RESPONSE TO QUERY
+
+**Analysis reveals a significant narrative divergence:** State media (GDELT) reports "de-escalation" and "diplomatic progress" (65% positive sentiment), while local Telegram OSINT channels document **increased troop movements** and **artillery repositioning** near Kharkiv and Sumy oblasts.
+
+### B. KEY INTELLIGENCE HIGHLIGHTS
+
+• **Narrative Divergence Detected:** GDELT state media sources published 47 articles (Dec 14-18) emphasizing "ceasefire talks" and "withdrawal agreements". Simultaneously, Telegram channels (@CITeam_ua, @DeepStateUA, @Rybar) reported 23 confirmed sightings of armored columns moving **toward** the border, not away.
+
+• **Kinetic Reality Check:** NASA FIRMS detected 156 thermal anomalies in Kharkiv Oblast (Dec 16-17), a **340% increase** from the 7-day baseline. Coordinates cluster around (49.9°N, 36.2°E), consistent with artillery positions reported by @CITeam_ua 4 hours prior.
+
+• **Cyber Indicators Align:** AlienVault OTX shows a **spike in DDoS pulses** targeting Ukrainian energy infrastructure IPs (+180% vs. baseline). Attack vectors match Russian APT28 TTPs, contradicting the "peaceful" narrative.
+
+• **Temporal Correlation:** State media "peace talks" articles peaked on Dec 16 at 14:00 UTC, exactly **6 hours before** Telegram channels reported renewed shelling near Vovchansk (50.29°N, 36.93°E).
+
+### C. CONFIDENCE ASSESSMENT
+
+**Overall Confidence:** 82%
+**Intelligence Quality:** HIGH  
+**Query Complexity:** MODERATE
+
+**Assessment:** Strong multi-source corroboration between kinetic signals (FIRMS), cyber activity (OTX), and ground truth (Telegram). State media narrative assessed as **disinformation or strategic misdirection**.
+
+–––
+
+## SECTION IV – ACTIONABLE INTELLIGENCE & RECOMMENDATIONS
+
+### A. IMMEDIATE ACTIONS
+
+1. **Monitor Artillery Deployment:** Track thermal anomalies in cluster zone (49.8-50.1°N, 36.0-36.5°E)
+2. **Cross-Reference Telegram Geotagged Posts:** Validate troop movement claims with FIRMS data
+3. **Cyber Defense Alert:** Warn energy sector of probable escalation in DDoS attacks
+
+### B. MONITORING INDICATORS
+
+• Thermal anomaly density >100/day in Kharkiv Oblast = High kinetic alert
+• State media "peace" keyword volume inversely correlated with FIRMS detections
+• OTX pulse velocity >50 new IoCs/day targeting UA infrastructure
+
+### C. FOLLOW-UP COLLECTION
+
+• **Satellite Tasking:** Request commercial SAR imagery of Vovchansk area for vehicle count validation
+• **SIGINT Cross-Check:** Correlate with radio chatter reports from Telegram (if available)
+• **GDELT Deep Dive:** Analyze which state outlets push "peace" narrative hardest (identify amplifiers)
+
+–––
+
+## SECTION V – INTELLIGENCE ASSESSMENT METADATA
+
+### A. SOURCE RELIABILITY MATRIX
+
+| Source | Reliability | Credibility | Timeliness | Grade | Notes |
+|--------|-------------|-------------|------------|-------|-------|
+| GDELT News | C | 4 | Current | C-4 | State bias detected |
+| Telegram OSINT | B | 2 | Real-time | B-2 | Verified channels only |
+| NASA FIRMS | A | 1 | 3-hour lag | A-1 | Physics-based, no bias |
+| AlienVault OTX | B | 2 | Current | B-2 | Community-sourced |
+
+**Grading Key:** Reliability (A-F), Credibility (1-6, lower=better)
+
+### B. ANALYTICAL CONFIDENCE
+
+- **Methodology:** Dual-LLM reasoning with Bayesian hypothesis updating
+- **Primary Evidence:** 156 thermal anomalies + 23 Telegram sightings + 47 DDoS pulses
+- **Assumptions:** Telegram channels are not compromised; FIRMS anomalies exclude wildfires (verified via intensity >350K)
+
+–––
+
+## SECTION VI – INTELLIGENCE NARRATIVE ANALYSIS
+
+**Assessed Purpose of State Media Narrative:**
+The timing and intensity of "de-escalation" messaging suggests a **strategic deception operation** to:
+1. Lower international alert posture before kinetic action
+2. Create plausible deniability for troop repositioning ("exercises")
+3. Exploit Western holiday period (Dec 20-25) for reduced monitoring
+
+**Risk:** If pattern holds, expect significant military action within **72-96 hours** of peak "peace" messaging.
+
+–––
+
+**CLASSIFICATION:** OSINT / PUBLIC  
+**ANALYST:** Project Overwatch Dual-LLM Intelligence System  
+**SESSION:** 20251218_194200_narrative_divergence_analysis
+
+〔END SITREP〕
 ```
 </details>
 
@@ -454,10 +535,12 @@ All reasoning steps are logged to `reasoning.log` including:
 - [x] **RSS Feeds** - Independent news sources (Meduza, The Insider, The Cradle)
 
 ### 🟡 Future
-- [ ] Two agents, one for reasoning and onde for strictly JSON output
-- [ ] Event correlation engine
-- [ ] Real-time alerting
+- [x] Two agents, one for reasoning and onde for strictly JSON output
+- [x] Event correlation engine
 - [x] Web dashboard
+- [ ] add duckduckgo search tool
+- [ ] add https://ddosecrets.com/ as a tool
+- [ ] create a poc agent using PydanticAI instead of the current langchain agent
 
 ## 📄 License
 
