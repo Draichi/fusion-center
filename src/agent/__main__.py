@@ -58,15 +58,9 @@ Examples:
         help="Research task or question to investigate",
     )
     parser.add_argument(
-        "--provider",
-        choices=["gemini", "grok", "ollama", "docker"],
-        default=None,
-        help=f"LLM provider (default: {settings.agent_provider})",
-    )
-    parser.add_argument(
         "--model",
         default=None,
-        help="Model name override",
+        help="Model name override (uses Ollama)",
     )
     parser.add_argument(
         "--server",
@@ -102,21 +96,12 @@ def print_providers() -> None:
     """Print available LLM providers."""
     logger.divider("Available LLM Providers")
     
-    providers = [
-        ("gemini", settings.has_google_key, settings.agent_model_gemini, "GOOGLE_API_KEY"),
-        ("grok", settings.has_xai_key, settings.agent_model_grok, "XAI_API_KEY"),
-        ("ollama", True, settings.agent_model_ollama, "(local - no key)"),
-        ("docker", True, settings.agent_model_docker, "(Docker Model Runner - no key)"),
-    ]
+    logger.markdown(f"**ollama** ✅")
+    logger.markdown(f"  - Model: `{settings.agent_model}`")
+    logger.markdown(f"  - Base URL: `{settings.ollama_base_url}`")
+    logger.markdown("")
     
-    for name, configured, model, key_name in providers:
-        status = "✅" if configured else "❌"
-        logger.markdown(f"**{name}** {status}")
-        logger.markdown(f"  - Model: `{model}`")
-        logger.markdown(f"  - Key: `{key_name}`")
-        logger.markdown("")
-    
-    logger.info(f"Default provider: [bold]{settings.agent_provider}[/bold]")
+    logger.info("Using Ollama as the only provider")
 
 
 def print_report(state: dict) -> None:
@@ -189,20 +174,9 @@ async def main() -> None:
             logger.error("Invalid JSON context provided")
             sys.exit(1)
     
-    # Determine provider
-    provider = args.provider or settings.agent_provider
-    
-    # Check if provider is available
-    if provider == "gemini" and not settings.has_google_key:
-        logger.error("GOOGLE_API_KEY not set. Get your key at: https://aistudio.google.com/app/apikey")
-        sys.exit(1)
-    elif provider == "grok" and not settings.has_xai_key:
-        logger.error("XAI_API_KEY not set. Get your key at: https://console.x.ai/")
-        sys.exit(1)
-    # ollama and docker are always available (local)
-    
     logger.info(f"Starting research: [bold]{args.task}[/bold]")
-    logger.info(f"Provider: [bold]{provider}[/bold]")
+    logger.info(f"Provider: [bold]ollama[/bold]")
+    logger.info(f"Model: [bold]{args.model or settings.agent_model}[/bold]")
     logger.info(f"Max iterations: [bold]{args.max_iter}[/bold]")
     
     try:
@@ -210,7 +184,6 @@ async def main() -> None:
         
         agent = DeepResearchAgent(
             mcp_server_url=args.server,
-            provider=provider,
             model=args.model,
             max_iterations=args.max_iter,
         )

@@ -38,11 +38,14 @@ agent = [
     "langchain-openai>=0.2.0",
     "langgraph-checkpoint>=2.0.0",
     "alive-progress>=3.0.0",
+    "pydantic-ai>=0.2.0",
+    "pydantic-ai-slim[openai]>=0.2.0",
 ]
 
 [project.scripts]
 overwatch-server = "src.mcp_server.server:main"
 overwatch-agent = "src.agent.__main__:main"
+overwatch-agent-v2 = "src.agent_v2.__main__:main"
 overwatch-dashboard = "src.dashboard.server:main"
 
 [build-system]

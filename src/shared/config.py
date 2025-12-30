@@ -48,34 +48,18 @@ class Settings(BaseSettings):
     gdelt_api_base_url: str = "https://api.gdeltproject.org/api/v2"
 
     # ==========================================================================
-    # LLM Provider API Keys
+    # LLM Provider Configuration (Ollama only)
     # ==========================================================================
     
-    # Google Gemini
-    google_api_key: str | None = None
-    
-    # xAI Grok
-    xai_api_key: str | None = None
-    
-    # Ollama (local - no key needed, just URL)
-    ollama_base_url: str = "http://localhost:11434"
-    
-    # Docker Model Runner (local - no key needed, OpenAI-compatible API)
-    docker_model_base_url: str = "http://localhost:12434/engines/llama.cpp/v1"
+    # Ollama (local - no key needed)
+    # Note: /v1 suffix is required for OpenAI-compatible API
+    ollama_base_url: str = "http://localhost:11434/v1"
 
     # ==========================================================================
     # Agent Configuration
     # ==========================================================================
     
-    # Available providers: gemini, grok, ollama, docker
-    agent_provider: Literal["gemini", "grok", "ollama", "docker"] = "gemini"
-    
-    # Model names per provider
-    agent_model_gemini: str = "gemini-2.0-flash-exp"
-    agent_model_grok: str = "grok-beta"
-    agent_model_ollama: str = "llama3.2"
-    agent_model_docker: str = "ai/qwen3:4B-UD-Q4_K_XL"
-    
+    agent_model: str = "llama3.2"
     agent_temperature: float = 0.7
     agent_max_iterations: int = 10
 
@@ -84,12 +68,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     
     # Structured Output LLM (JSON mode, for planning/analysis/correlation nodes)
-    structured_llm_provider: Literal["gemini", "grok", "ollama", "docker"] = "ollama"
     structured_llm_model: str = "qwen2.5:7b"
     structured_llm_temperature: float = 0.3
     
     # Thinking/Reasoning LLM (for reflection/verification/synthesis nodes)
-    thinking_llm_provider: Literal["gemini", "grok", "ollama", "docker"] = "ollama"
     thinking_llm_model: str = "llama3.2"
     thinking_llm_temperature: float = 0.7
 
@@ -120,39 +102,6 @@ class Settings(BaseSettings):
         """Check if AlienVault OTX API key is configured."""
         return bool(self.otx_api_key)
 
-    @property
-    def has_google_key(self) -> bool:
-        """Check if Google API key is configured."""
-        return bool(self.google_api_key)
-
-    @property
-    def has_xai_key(self) -> bool:
-        """Check if xAI (Grok) API key is configured."""
-        return bool(self.xai_api_key)
-
-    @property
-    def agent_model(self) -> str:
-        """Get the model name for the configured provider."""
-        models = {
-            "gemini": self.agent_model_gemini,
-            "grok": self.agent_model_grok,
-            "ollama": self.agent_model_ollama,
-            "docker": self.agent_model_docker,
-        }
-        return models.get(self.agent_provider, self.agent_model_gemini)
-
-    def get_available_providers(self) -> list[str]:
-        """Get list of providers with configured API keys."""
-        available = []
-        if self.has_google_key:
-            available.append("gemini")
-        if self.has_xai_key:
-            available.append("grok")
-        # Ollama is always available (local)
-        available.append("ollama")
-        # Docker Model Runner is always available (local)
-        available.append("docker")
-        return available
 
 
 @lru_cache

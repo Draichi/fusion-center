@@ -38,103 +38,36 @@ logger = get_logger()
 
 
 def get_llm(
-    provider: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
 ) -> BaseChatModel:
     """
-    Get the appropriate LLM based on provider configuration.
-    
-    Supported providers:
-    - gemini: Google Gemini (requires GOOGLE_API_KEY)
-    - grok: xAI Grok (requires XAI_API_KEY)
-    - ollama: Local Ollama (no key required)
-    - docker: Docker Model Runner (no key required)
+    Get the Ollama LLM.
     
     Args:
-        provider: Provider name override (default from settings)
         model: Model name override
         temperature: Temperature for generation
         
     Returns:
-        Configured LLM instance
+        Configured Ollama LLM instance
     """
-    provider = provider or settings.agent_provider
     temp = temperature if temperature is not None else settings.agent_temperature
     
-    if provider == "gemini":
-        if not settings.has_google_key:
-            raise ValueError(
-                "GOOGLE_API_KEY not set. "
-                "Get your key at: https://aistudio.google.com/app/apikey"
-            )
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        
-        model_name = model or settings.agent_model_gemini
-        logger.info(f"Using Gemini: [bold]{model_name}[/bold]")
-        
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temp,
-            google_api_key=settings.google_api_key,
-        )
+    from langchain_ollama import ChatOllama
     
-    elif provider == "grok":
-        if not settings.has_xai_key:
-            raise ValueError(
-                "XAI_API_KEY not set. "
-                "Get your key at: https://console.x.ai/"
-            )
-        # xAI Grok uses OpenAI-compatible API
-        # We use langchain-openai as a client only (not OpenAI service)
-        from langchain_openai import ChatOpenAI
-        
-        model_name = model or settings.agent_model_grok
-        logger.info(f"Using Grok (xAI): [bold]{model_name}[/bold]")
-        
-        return ChatOpenAI(
-            model=model_name,
-            temperature=temp,
-            api_key=settings.xai_api_key,
-            base_url="https://api.x.ai/v1",
-        )
+    model_name = model or settings.agent_model
+    logger.info(f"Using Ollama (local): [bold]{model_name}[/bold]")
     
-    elif provider == "ollama":
-        from langchain_ollama import ChatOllama
-        
-        model_name = model or settings.agent_model_ollama
-        logger.info(f"Using Ollama (local): [bold]{model_name}[/bold]")
-        
-        return ChatOllama(
-            model=model_name,
-            temperature=temp,
-            base_url=settings.ollama_base_url,
-        )
-    
-    elif provider == "docker":
-        # Docker Model Runner uses OpenAI-compatible API
-        from langchain_openai import ChatOpenAI
-        
-        model_name = model or settings.agent_model_docker
-        logger.info(f"Using Docker Model Runner: [bold]{model_name}[/bold]")
-        
-        return ChatOpenAI(
-            model=model_name,
-            temperature=temp,
-            api_key="docker-model-runner",  # Not required, but LangChain needs something
-            base_url=settings.docker_model_base_url,
-        )
-    
-    else:
-        raise ValueError(
-            f"Unknown provider: {provider}. "
-            f"Supported: gemini, grok, ollama, docker"
-        )
+    return ChatOllama(
+        model=model_name,
+        temperature=temp,
+        base_url=settings.ollama_base_url,
+    )
 
 
 def get_dual_llms() -> tuple[BaseChatModel, BaseChatModel]:
     """
-    Get both thinking and structured LLMs for dual-LLM architecture.
+    Get both thinking and structured LLMs for dual-LLM architecture (Ollama).
     
     Returns:
         Tuple of (thinking_llm, structured_llm)
@@ -143,19 +76,17 @@ def get_dual_llms() -> tuple[BaseChatModel, BaseChatModel]:
     
     # Initialize thinking LLM
     thinking_llm = get_llm(
-        provider=settings.thinking_llm_provider,
         model=settings.thinking_llm_model,
         temperature=settings.thinking_llm_temperature,
     )
-    logger.info(f"  Thinking LLM: [bold]{settings.thinking_llm_provider}/{settings.thinking_llm_model}[/bold] (temp={settings.thinking_llm_temperature})")
+    logger.info(f"  Thinking LLM: [bold]ollama/{settings.thinking_llm_model}[/bold] (temp={settings.thinking_llm_temperature})")
     
     # Initialize structured LLM
     structured_llm = get_llm(
-        provider=settings.structured_llm_provider,
         model=settings.structured_llm_model,
         temperature=settings.structured_llm_temperature,
     )
-    logger.info(f"  Structured LLM: [bold]{settings.structured_llm_provider}/{settings.structured_llm_model}[/bold] (temp={settings.structured_llm_temperature})")
+    logger.info(f"  Structured LLM: [bold]ollama/{settings.structured_llm_model}[/bold] (temp={settings.structured_llm_temperature})")
     
     return thinking_llm, structured_llm
 
@@ -308,49 +239,40 @@ def build_research_graph(
 
 class DeepResearchAgent:
     """
-    Deep Research Agent using LangGraph.
+    Deep Research Agent using LangGraph with Ollama.
     
-    Supports multiple LLM providers:
-    - Gemini (Google)
-    - Grok (xAI)
-    - Ollama (local)
-    - Docker Model Runner (local)
+    Uses dual-LLM architecture configured in .env:
+    - Thinking LLM for complex reasoning
+    - Structured LLM for JSON outputs
     """
     
     def __init__(
         self,
         mcp_server_url: str | None = None,
-        provider: str | None = None,  # Deprecated: ignored, uses dual-LLM from .env
-        model: str | None = None,  # Deprecated: ignored, uses dual-LLM from .env
-        temperature: float | None = None,  # Deprecated: ignored, uses dual-LLM from .env
+        model: str | None = None,
         max_iterations: int | None = None,
         use_checkpointer: bool = True,
     ):
         """
         Initialize the Deep Research Agent with dual-LLM architecture.
         
-        The agent always uses two separate LLMs configured in .env:
-        - THINKING_LLM_* for complex reasoning (reflection, verification, synthesis)
-        - STRUCTURED_LLM_* for structured JSON outputs (planning, analysis, correlation)
-        
         Args:
             mcp_server_url: URL of the MCP server SSE endpoint
-            provider: DEPRECATED - ignored, dual-LLM config from .env is used
-            model: DEPRECATED - ignored, dual-LLM config from .env is used
-            temperature: DEPRECATED - ignored, dual-LLM config from .env is used
+            model: Optional model override (applies to both LLMs if set)
             max_iterations: Maximum research iterations
             use_checkpointer: Whether to enable state persistence
         """
         self.mcp_server_url = mcp_server_url or f"http://{settings.mcp_server_host}:{settings.mcp_server_port}/sse"
         self.max_iterations = max_iterations if max_iterations is not None else settings.agent_max_iterations
         
-        # Always use dual-LLM architecture (ignore legacy parameters if passed)
-        if provider or model or temperature is not None:
-            logger.debug(f"Ignoring legacy parameters (provider={provider}, model={model}, temperature={temperature})")
-            logger.debug("Using dual-LLM configuration from .env instead")
-        
         # Initialize dual LLMs from .env configuration
-        self.thinking_llm, self.structured_llm = get_dual_llms()
+        if model:
+            # Override both LLMs with the same model
+            self.thinking_llm = get_llm(model=model, temperature=settings.thinking_llm_temperature)
+            self.structured_llm = get_llm(model=model, temperature=settings.structured_llm_temperature)
+        else:
+            # Use configured models from .env
+            self.thinking_llm, self.structured_llm = get_dual_llms()
         
         # Initialize checkpointer for persistence
         self.checkpointer = MemorySaver() if use_checkpointer else None
@@ -358,7 +280,7 @@ class DeepResearchAgent:
         # Build the graph with dual LLMs
         self.graph = build_research_graph(self.thinking_llm, self.structured_llm, self.checkpointer)
         
-        logger.info(f"Deep Research Agent initialized with dual-LLM architecture")
+        logger.info(f"Deep Research Agent initialized with Ollama dual-LLM architecture")
         logger.info(f"MCP Server: [bold]{self.mcp_server_url}[/bold]")
     
     async def research(
