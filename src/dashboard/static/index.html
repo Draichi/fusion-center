@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PROJECT OVERWATCH - FUSION CENTER</title>
+    <title>PROJECT OVERWATCH - AGENT BRAIN</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,53 +11,177 @@
         <!-- Header -->
         <div class="header">
             <div class="header-line">
-                <span class="prompt">C:\OVERWATCH\FUSION_CENTER></span>
+                <span class="prompt">C:\OVERWATCH\AGENT_BRAIN></span>
                 <span class="blink">_</span>
             </div>
             <div class="title">
                 ╔══════════════════════════════════════════════════════════════════════════════╗
                 ║                                                                              ║
-                ║                    PROJECT OVERWATCH - FUSION CENTER                         ║
-                ║                         OSINT DASHBOARD v0.1.0                              ║
+                ║                      PROJECT OVERWATCH - AGENT BRAIN                         ║
+                ║                      Research Intelligence Monitor v0.2.0                    ║
                 ║                                                                              ║
                 ╚══════════════════════════════════════════════════════════════════════════════╝
+            </div>
+            <div class="nav-links">
+                <span class="nav-active">[AGENT BRAIN]</span>
+                <a href="/correlation-engine" class="nav-link">[CORRELATION ENGINE]</a>
+            </div>
+        </div>
+
+        <!-- Connection Status Bar -->
+        <div class="status-bar">
+            <div class="status-indicator" id="connection-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">CONNECTING...</span>
+            </div>
+            <div class="session-info" id="session-info">
+                <span class="session-label">SESSION:</span>
+                <span class="session-id" id="session-id">--</span>
+            </div>
+            <div class="live-indicator" id="live-indicator">
+                <span class="live-badge historical">HISTORICAL</span>
+            </div>
+        </div>
+
+        <!-- Research Input -->
+        <div class="research-input-container">
+            <div class="input-wrapper">
+                <span class="input-prompt">RESEARCH QUERY></span>
+                <input type="text" id="research-query" class="research-input"
+                       placeholder="Enter your research query..."
+                       autocomplete="off">
+                <button id="start-research" class="research-button">
+                    <span class="button-text">START</span>
+                </button>
+            </div>
+            <div class="input-status" id="input-status"></div>
+        </div>
+
+        <!-- Phase Progress -->
+        <div class="phase-container">
+            <div class="phase-title">[RESEARCH PHASES]</div>
+            <div class="phase-track">
+                <div class="phase-item" data-phase="planning">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">PLAN</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="decomposition">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">DECOMPOSE</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="hypothesis">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">HYPOTHESIZE</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="gathering">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">GATHER</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="analysis">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">ANALYZE</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="reflection">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">REFLECT</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="verification">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">VERIFY</div>
+                </div>
+                <div class="phase-connector"></div>
+                <div class="phase-item" data-phase="synthesis">
+                    <div class="phase-dot"></div>
+                    <div class="phase-label">SYNTHESIZE</div>
+                </div>
+            </div>
+            <div class="iteration-bar">
+                <span class="iteration-label">ITERATION:</span>
+                <span class="iteration-current" id="iteration-current">0</span>
+                <span class="iteration-separator">/</span>
+                <span class="iteration-max" id="iteration-max">5</span>
+                <div class="iteration-progress">
+                    <div class="iteration-fill" id="iteration-fill" style="width: 0%"></div>
+                </div>
             </div>
         </div>
 
         <!-- Main Content -->
-        <div class="content">
+        <div class="content agent-brain-content">
             <!-- Left Column -->
             <div class="column left">
-                <!-- News Section -->
-                <div class="panel">
+                <!-- Research Plan / Objectives -->
+                <div class="panel compact-panel">
                     <div class="panel-header">
-                        <span class="panel-title">[NEWS] Latest Intelligence Reports</span>
-                        <span class="panel-status" id="news-status">LOADING...</span>
+                        <span class="panel-title">[OBJECTIVES]</span>
+                        <span class="panel-status" id="objectives-status">--</span>
                     </div>
-                    <div class="panel-content" id="news-content">
-                        <div class="loading">Fetching news data...</div>
+                    <div class="panel-content scrollable" id="objectives-content">
+                        <div class="empty-state">Waiting for research to start...</div>
                     </div>
                 </div>
 
-                <!-- Telegram Section -->
-                <div class="panel">
+                <!-- Sub-Tasks -->
+                <div class="panel compact-panel">
                     <div class="panel-header">
-                        <span class="panel-title">[TELEGRAM] OSINT Channel Feed</span>
-                        <span class="panel-status" id="telegram-status">LOADING...</span>
+                        <span class="panel-title">[SUB-TASKS]</span>
+                        <span class="panel-status" id="subtasks-status">0</span>
                     </div>
-                    <div class="panel-content" id="telegram-content">
-                        <div class="loading">Fetching Telegram data...</div>
+                    <div class="panel-content scrollable" id="subtasks-content">
+                        <div class="empty-state">No sub-tasks yet...</div>
                     </div>
                 </div>
 
-                <!-- Threat Intel Section -->
+                <!-- Hypotheses -->
+                <div class="panel compact-panel">
+                    <div class="panel-header">
+                        <span class="panel-title">[HYPOTHESES]</span>
+                        <span class="panel-status" id="hypotheses-status">0</span>
+                    </div>
+                    <div class="panel-content scrollable" id="hypotheses-content">
+                        <div class="empty-state">No hypotheses yet...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Column -->
+            <div class="column middle">
+                <!-- Tool Calls Feed -->
+                <div class="panel tool-panel">
+                    <div class="panel-header">
+                        <span class="panel-title">[TOOL CALLS]</span>
+                        <span class="panel-status" id="tools-status">0</span>
+                    </div>
+                    <div class="panel-content scrollable tool-feed" id="tools-content">
+                        <div class="empty-state">No tool calls yet...</div>
+                    </div>
+                </div>
+
+                <!-- Key Insights -->
                 <div class="panel">
                     <div class="panel-header">
-                        <span class="panel-title">[THREAT_INTEL] AlienVault OTX Pulses</span>
-                        <span class="panel-status" id="threat-status">LOADING...</span>
+                        <span class="panel-title">[KEY INSIGHTS]</span>
+                        <span class="panel-status" id="insights-status">0</span>
                     </div>
-                    <div class="panel-content" id="threat-content">
-                        <div class="loading">Fetching threat intel data...</div>
+                    <div class="panel-content scrollable" id="insights-content">
+                        <div class="empty-state">No insights yet...</div>
+                    </div>
+                </div>
+
+                <!-- Correlations -->
+                <div class="panel compact-panel">
+                    <div class="panel-header">
+                        <span class="panel-title">[CORRELATIONS]</span>
+                        <span class="panel-status" id="correlations-status">0</span>
+                    </div>
+                    <div class="panel-content scrollable" id="correlations-content">
+                        <div class="empty-state">No correlations found...</div>
                     </div>
                 </div>
             </div>
@@ -65,17 +189,35 @@
             <!-- Right Column -->
             <div class="column right">
                 <!-- Globe Section -->
-                <div class="panel globe-panel">
+                <div class="panel globe-panel-small">
                     <div class="panel-header">
-                        <span class="panel-title">[SATELLITE] Thermal Anomalies Detection</span>
-                        <span class="panel-status" id="anomalies-status">LOADING...</span>
+                        <span class="panel-title">[RESEARCH LOCATIONS]</span>
+                        <span class="panel-status" id="locations-status">--</span>
                     </div>
                     <div class="panel-content globe-container">
                         <div id="globe-container"></div>
                     </div>
-                    <div class="globe-info" id="globe-info">
-                        <div class="info-line">Anomalies detected: <span id="anomalies-count">0</span></div>
-                        <div class="info-line">Last update: <span id="last-update">--</span></div>
+                </div>
+
+                <!-- Reflection Notes -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">[REFLECTION NOTES]</span>
+                        <span class="panel-status" id="reflections-status">0</span>
+                    </div>
+                    <div class="panel-content scrollable" id="reflections-content">
+                        <div class="empty-state">No reflections yet...</div>
+                    </div>
+                </div>
+
+                <!-- Uncertainties -->
+                <div class="panel compact-panel">
+                    <div class="panel-header">
+                        <span class="panel-title">[UNCERTAINTIES]</span>
+                        <span class="panel-status" id="uncertainties-status">0</span>
+                    </div>
+                    <div class="panel-content scrollable" id="uncertainties-content">
+                        <div class="empty-state">No uncertainties identified...</div>
                     </div>
                 </div>
             </div>
@@ -85,26 +227,20 @@
         <div class="footer">
             <div class="footer-line">
                 <span class="prompt">STATUS:</span>
-                <span id="system-status">SYSTEM OPERATIONAL</span>
+                <span id="system-status">AWAITING RESEARCH</span>
                 <span class="separator">|</span>
-                <span class="prompt">UPTIME:</span>
-                <span id="uptime">00:00:00</span>
+                <span class="prompt">FINDINGS:</span>
+                <span id="findings-count">0</span>
                 <span class="separator">|</span>
-                <span class="prompt">REFRESH:</span>
-                <span id="refresh-timer">60s</span>
+                <span class="prompt">WS:</span>
+                <span id="ws-status">DISCONNECTED</span>
             </div>
         </div>
     </div>
 
     <!-- Scripts -->
     <script src="https://unpkg.com/three@0.150.0/build/three.min.js"></script>
-    <!-- Post-processing scripts - load with proper dependencies -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/shaders/CopyShader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/postprocessing/EffectComposer.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/postprocessing/RenderPass.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
     <script src="https://unpkg.com/globe.gl@2.29.0/dist/globe.gl.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/agent-brain.js"></script>
 </body>
 </html>
-

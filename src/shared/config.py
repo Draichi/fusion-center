@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Event Correlation Engine Configuration
     ece_db_path: str = "data/ece.db"
 
+    # Agent Sessions Database Configuration
+    agent_sessions_db: str = "data/agent_sessions.db"
+    session_retention_days: int = 7
+
     # ==========================================================================
     # Data Source API Keys
     # ==========================================================================

@@ -1,18 +1,50 @@
 """
 API endpoints for the dashboard that connect to MCP server via HTTP/SSE.
+
+Includes:
+- Correlation Engine data endpoints (news, thermal anomalies, telegram, threat intel)
+- Agent control endpoints (start, status, sessions)
 """
 import asyncio
 import json
+import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from pydantic import BaseModel
 
 from src.shared.config import settings
 
 router = APIRouter()
+
+
+# =============================================================================
+# Agent Control Models
+# =============================================================================
+
+
+class StartResearchRequest(BaseModel):
+    """Request body for starting a new research task."""
+    query: str
+    max_iterations: int = 5
+
+
+class StartResearchResponse(BaseModel):
+    """Response for starting a new research task."""
+    session_id: str
+    status: str
+    message: str
+
+
+# Track active research task
+_active_research: dict[str, Any] = {
+    "session_id": None,
+    "task": None,
+    "running": False,
+}
 
 # Default MCP server URL
 DEFAULT_MCP_SERVER_URL = f"http://{settings.mcp_server_host}:{settings.mcp_server_port}/sse"
@@ -340,4 +372,211 @@ async def get_dashboard_data(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching dashboard data: {str(e)}")
+
+
+# =============================================================================
+# Agent Control Endpoints
+# =============================================================================
+
+
+async def _run_research_task(
+    session_id: str,
+    query: str,
+    max_iterations: int,
+    mcp_url: str,
+) -> None:
+    """
+    Background task to run research.
+
+    This function runs the agent_v2 research process while:
+    - Broadcasting state updates via WebSocket
+    - Persisting session state to SQLite
+    """
+    from src.agent_v2.agent import ResearchAgent
+    from src.agent_v2.websocket import get_ws_manager
+    from src.agent_v2.session import get_session_manager
+
+    ws_manager = get_ws_manager()
+    session_manager = get_session_manager()
+
+    # Mark research as active
+    ws_manager.current_session_id = session_id
+    ws_manager.is_research_active = True
+
+    try:
+        # Create session in database
+        session_manager.create_session(
+            session_id=session_id,
+            task=query,
+            max_iterations=max_iterations,
+        )
+
+        # Broadcast session start
+        await ws_manager.broadcast_session_start(
+            session_id=session_id,
+            task=query,
+            max_iterations=max_iterations,
+        )
+
+        # Create and run agent with WebSocket manager
+        agent = ResearchAgent(
+            mcp_url=mcp_url,
+            ws_manager=ws_manager,
+        )
+
+        sitrep = await agent.research(
+            task=query,
+            max_iterations=max_iterations,
+        )
+
+        # Get final context from agent
+        ctx = agent.ctx
+
+        # Complete session in database
+        session_manager.complete_session(
+            session_id=session_id,
+            ctx=ctx,
+            sitrep=sitrep.model_dump() if sitrep else None,
+            success=True,
+        )
+
+        # Broadcast completion
+        await ws_manager.broadcast_session_complete(
+            ctx=ctx,
+            sitrep=sitrep.model_dump() if sitrep else None,
+            success=True,
+        )
+
+    except Exception as e:
+        # Broadcast error
+        await ws_manager.broadcast_error(str(e))
+
+        # Mark session as failed if we have context
+        try:
+            from src.agent_v2.state import ResearchContext
+            empty_ctx = ResearchContext(task=query, max_iterations=max_iterations)
+            session_manager.complete_session(
+                session_id=session_id,
+                ctx=empty_ctx,
+                sitrep=None,
+                success=False,
+            )
+        except Exception:
+            pass
+
+    finally:
+        # Mark research as inactive
+        ws_manager.is_research_active = False
+        _active_research["running"] = False
+        _active_research["session_id"] = None
+        _active_research["task"] = None
+
+
+@router.post("/api/agent/start", response_model=StartResearchResponse)
+async def start_research(
+    request_body: StartResearchRequest,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+) -> StartResearchResponse:
+    """
+    Start a new research task.
+
+    The agent runs in the background, broadcasting state updates via WebSocket.
+
+    Args:
+        request_body: Contains query and max_iterations
+
+    Returns:
+        Session ID and status
+    """
+    if _active_research["running"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Research already in progress (session: {_active_research['session_id']})",
+        )
+
+    session_id = str(uuid.uuid4())
+    mcp_url = get_mcp_url(request)
+
+    # Mark as running
+    _active_research["running"] = True
+    _active_research["session_id"] = session_id
+    _active_research["task"] = request_body.query
+
+    # Start background task
+    background_tasks.add_task(
+        _run_research_task,
+        session_id=session_id,
+        query=request_body.query,
+        max_iterations=request_body.max_iterations,
+        mcp_url=mcp_url,
+    )
+
+    return StartResearchResponse(
+        session_id=session_id,
+        status="started",
+        message=f"Research started with query: {request_body.query[:50]}...",
+    )
+
+
+@router.get("/api/agent/status")
+async def get_agent_status() -> dict[str, Any]:
+    """
+    Get current agent status.
+
+    Returns:
+        Status information including running state and current session
+    """
+    from src.agent_v2.websocket import get_ws_manager
+
+    ws_manager = get_ws_manager()
+    return ws_manager.get_status()
+
+
+@router.get("/api/agent/sessions")
+async def list_sessions(limit: int = 10) -> dict[str, Any]:
+    """
+    List recent research sessions.
+
+    Args:
+        limit: Maximum number of sessions to return
+
+    Returns:
+        List of session metadata (not full state)
+    """
+    from src.agent_v2.session import get_session_manager
+
+    session_manager = get_session_manager()
+    sessions = session_manager.list_sessions(limit=limit)
+
+    return {
+        "status": "success",
+        "sessions": sessions,
+        "count": len(sessions),
+    }
+
+
+@router.get("/api/agent/sessions/{session_id}")
+async def get_session(session_id: str) -> dict[str, Any]:
+    """
+    Get a specific session by ID.
+
+    Args:
+        session_id: The session UUID
+
+    Returns:
+        Full session data including state and SITREP
+    """
+    from src.agent_v2.session import get_session_manager
+
+    session_manager = get_session_manager()
+    session = session_manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    return {
+        "status": "success",
+        "session": session,
+    }
 

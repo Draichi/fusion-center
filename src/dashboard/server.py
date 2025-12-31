@@ -1,22 +1,26 @@
 """
 Dashboard server for Project Overwatch.
 
-Serves a web dashboard with terminal DOS aesthetic showing:
-- Latest news
-- Thermal anomalies on a 3D globe
-- Telegram posts
-- Threat intelligence
+Serves two dashboards with terminal DOS aesthetic:
+- / (Agent Brain): Real-time visualization of agent_v2 research process
+- /correlation-engine: Original dashboard with news, thermal anomalies, Telegram, threat intel
+
+Features:
+- WebSocket endpoint for real-time agent state streaming
+- REST API for agent control and session management
 """
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.dashboard.api import router
+from src.agent_v2.websocket import get_ws_manager
+from src.agent_v2.session import get_session_manager
 
 # Create FastAPI app
-app = FastAPI(title="Project Overwatch Dashboard", version="0.1.0")
+app = FastAPI(title="Project Overwatch Dashboard", version="0.2.0")
 
 # Include API routes
 app.include_router(router)
@@ -27,11 +31,84 @@ dashboard_dir = Path(__file__).parent / "static"
 
 @app.get("/")
 async def index():
-    """Serve the main dashboard page."""
+    """Serve the Agent Brain dashboard (new main page)."""
     index_file = dashboard_dir / "index.html"
     if not index_file.exists():
         return {"error": "Dashboard files not found. Please ensure static files are present."}
     return FileResponse(index_file)
+
+
+@app.get("/correlation-engine")
+async def correlation_engine():
+    """Serve the Correlation Engine dashboard (original dashboard)."""
+    ce_file = dashboard_dir / "correlation-engine.html"
+    if not ce_file.exists():
+        return {"error": "Correlation Engine dashboard not found."}
+    return FileResponse(ce_file)
+
+
+@app.websocket("/ws/agent")
+async def agent_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time agent state streaming.
+
+    Clients connect here to receive:
+    - session_start: When a new research begins
+    - phase_change: When agent moves to a new phase with current state
+    - tool_call: Real-time tool call notifications
+    - session_complete: When research finishes
+    - error: Error notifications
+    - historical_session: On connect, if no active research
+    """
+    ws_manager = get_ws_manager()
+    session_manager = get_session_manager()
+
+    await ws_manager.connect(websocket)
+
+    try:
+        # Send initial state on connect
+        if ws_manager.is_research_active:
+            # Active research - client will receive live updates
+            await websocket.send_json({
+                "type": "connection_status",
+                "status": "connected",
+                "is_live": True,
+                "session_id": ws_manager.current_session_id,
+                "current_phase": ws_manager.current_phase,
+            })
+        else:
+            # No active research - send last session
+            last_session = session_manager.get_latest_session()
+            if last_session:
+                await websocket.send_json({
+                    "type": "historical_session",
+                    "is_live": False,
+                    "data": last_session,
+                })
+            else:
+                await websocket.send_json({
+                    "type": "connection_status",
+                    "status": "connected",
+                    "is_live": False,
+                    "message": "No previous sessions found",
+                })
+
+        # Keep connection alive, listen for client messages
+        while True:
+            data = await websocket.receive_json()
+            # Handle client commands if needed (e.g., request state refresh)
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif data.get("type") == "request_status":
+                await websocket.send_json({
+                    "type": "status",
+                    **ws_manager.get_status(),
+                })
+
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception as e:
+        await ws_manager.disconnect(websocket)
 
 
 # Mount static files
@@ -86,9 +163,11 @@ Examples:
     app.state.mcp_url = args.mcp_url or f"http://{settings.mcp_server_host}:{settings.mcp_server_port}/sse"
     
     print(f"🌐 Starting Project Overwatch Dashboard...")
-    print(f"📍 Dashboard available at: http://{args.host}:{args.port}")
-    print(f"📊 API docs at: http://{args.host}:{args.port}/docs")
-    print(f"🔗 MCP Server: {app.state.mcp_url}")
+    print(f"📍 Agent Brain:         http://{args.host}:{args.port}/")
+    print(f"📍 Correlation Engine:  http://{args.host}:{args.port}/correlation-engine")
+    print(f"🔌 WebSocket:           ws://{args.host}:{args.port}/ws/agent")
+    print(f"📊 API docs:            http://{args.host}:{args.port}/docs")
+    print(f"🔗 MCP Server:          {app.state.mcp_url}")
     print(f"\n⚠️  Make sure the MCP server is running!")
     print(f"   Start with: python -m src.mcp_server.server --transport sse --port {settings.mcp_server_port}")
     

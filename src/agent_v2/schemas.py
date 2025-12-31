@@ -137,6 +137,28 @@ class VerificationOutput(BaseModel):
 
 
 # =============================================================================
+# Synthesis Thinking Schema (Pre-formatting analysis)
+# =============================================================================
+
+
+class SynthesisThinkingOutput(BaseModel):
+    """Output from the synthesis thinking phase - deep analysis before formatting."""
+    executive_summary: str = Field(description="Direct answer to the user's query with key findings")
+    key_findings: list[str] = Field(description="3-5 critical bullet points with source citations")
+    detailed_analysis: str = Field(description="In-depth analysis of the situation, patterns, and connections")
+    satellite_analysis: str = Field(default="No satellite data collected.", description="Analysis of NASA FIRMS thermal data")
+    news_analysis: str = Field(default="No news data collected.", description="Analysis of GDELT/RSS news findings")
+    cyber_analysis: str = Field(default="No cyber intelligence collected.", description="Analysis of IODA/OTX cyber data")
+    social_analysis: str = Field(default="No social media data collected.", description="Analysis of Telegram findings")
+    cross_source_insights: str = Field(default="", description="How different sources corroborate or contradict")
+    intelligence_gaps: list[str] = Field(default_factory=list, description="What information is missing")
+    recommendations: list[str] = Field(default_factory=list, description="Actionable recommendations")
+    monitoring_priorities: list[str] = Field(default_factory=list, description="What to watch going forward")
+    confidence_assessment: str = Field(description="Overall confidence level and why")
+    sources_used: list[str] = Field(default_factory=list, description="List of intelligence sources used")
+
+
+# =============================================================================
 # SITREP Output Schema (Final Report)
 # =============================================================================
 
